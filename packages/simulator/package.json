@@ -1,0 +1,17 @@
+{
+  "name": "@digital-twin/simulator",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.0",
+    "@digital-twin/shared": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

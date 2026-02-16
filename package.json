@@ -1,0 +1,16 @@
+{
+  "name": "digital-twin-poc",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "concurrently -n broker,sim,ui -c blue,yellow,green \"npm run dev:broker\" \"npm run dev:simulator\" \"npm run dev:frontend\"",
+    "dev:broker": "npm -w packages/broker run dev",
+    "dev:simulator": "npm -w packages/simulator run dev",
+    "dev:frontend": "npm -w packages/frontend run dev",
+    "build:shared": "npm -w packages/shared run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  }
+}
