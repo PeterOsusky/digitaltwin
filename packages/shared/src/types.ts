@@ -192,7 +192,7 @@ export type WsMessage =
 export type WsRequest =
   | { type: 'get_part_history'; partId: string }
   | { type: 'search_part'; query: string }
-  | { type: 'override_part'; partId: string };
+  | { type: 'override_part'; partId: string; fromStationId?: string; toStationId?: string; failedSensorId?: string };
 
 export type WsResponse =
   | { type: 'part_history'; data: Part | null }

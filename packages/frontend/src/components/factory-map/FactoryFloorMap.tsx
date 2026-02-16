@@ -233,6 +233,12 @@ export function FactoryFloorMap() {
               key={transit.partId}
               transit={transit}
               beltPathId={beltPathId}
+              isSelected={selectedPartId === transit.partId}
+              onClick={() => {
+                selectPart(transit.partId);
+                selectStation(null);
+                selectSensor(null);
+              }}
             />
           );
         })}

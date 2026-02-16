@@ -165,8 +165,8 @@ function PartDetail({
         <p className="text-xs text-gray-500 font-mono">{part.partId}</p>
       </div>
 
-      {/* Stopped at sensor alert */}
-      {(isStoppedAtSensor || lastFailEvent) && (
+      {/* Stopped at sensor alert — only show when part is currently scrapped/stopped */}
+      {(isStoppedAtSensor || (lastFailEvent && part.status === 'scrapped')) && (
         <div className="bg-red-900/40 border border-red-700/60 rounded p-3">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-red-400 font-bold text-xs">⚠ STOPPED AT SENSOR</span>
@@ -190,7 +190,13 @@ function PartDetail({
           )}
           <button
             onClick={() => {
-              sendWsMessage({ type: 'override_part', partId });
+              sendWsMessage({
+                type: 'override_part',
+                partId,
+                fromStationId: lastFailEvent?.fromStationId ?? transit?.fromStationId,
+                toStationId: lastFailEvent?.toStationId ?? transit?.toStationId,
+                failedSensorId: lastFailEvent?.sensorId,
+              });
             }}
             className="mt-2 w-full bg-green-700 hover:bg-green-600 text-white text-xs font-bold py-1.5 px-3 rounded transition-colors"
           >

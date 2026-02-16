@@ -5,9 +5,11 @@ import { shortPartId } from '../../utils/format.ts';
 interface Props {
   transit: TransitPart;
   beltPathId: string;
+  isSelected?: boolean;
+  onClick?: () => void;
 }
 
-export function TransitPartChip({ transit, beltPathId }: Props) {
+export function TransitPartChip({ transit, beltPathId, isSelected, onClick }: Props) {
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number>(0);
   const stoppedProgressRef = useRef<number | null>(null);
@@ -22,7 +24,6 @@ export function TransitPartChip({ transit, beltPathId }: Props) {
       let progress: number;
 
       if (transit.stopped) {
-        // Freeze at whatever progress was when stopped
         if (stoppedProgressRef.current === null) {
           stoppedProgressRef.current = Math.min(
             (Date.now() - transit.startedAt) / transit.transitTimeMs,
@@ -40,7 +41,6 @@ export function TransitPartChip({ transit, beltPathId }: Props) {
       const point = pathEl!.getPointAtLength(totalLength * progress);
       setPosition({ x: point.x, y: point.y });
 
-      // Keep animating if not done and not stopped
       if (progress < 1 && !transit.stopped) {
         rafRef.current = requestAnimationFrame(animate);
       }
@@ -58,42 +58,54 @@ export function TransitPartChip({ transit, beltPathId }: Props) {
   if (!position) return null;
 
   const label = shortPartId(transit.partId);
-  const pillWidth = 44;
-  const pillHeight = 16;
+  const stopped = transit.stopped;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClick?.();
+  };
+
+  const r = 7;
 
   return (
-    <g>
-      {/* Pill background */}
-      <rect
-        x={position.x - pillWidth / 2}
-        y={position.y - pillHeight / 2}
-        width={pillWidth}
-        height={pillHeight}
-        rx={pillHeight / 2}
-        fill="#3b82f6"
-        stroke="#1e3a8a"
+    <g onClick={handleClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
+      {/* Invisible hit area for easier clicking */}
+      <circle cx={position.x} cy={position.y} r={14} fill="transparent" />
+
+      {/* Selection ring */}
+      {isSelected && (
+        <circle
+          cx={position.x} cy={position.y} r={12}
+          fill="none" stroke="#60a5fa" strokeWidth={2} opacity={0.8}
+          filter="url(#glow)"
+        />
+      )}
+
+      {/* Stopped pulsing ring */}
+      {stopped && !isSelected && (
+        <circle
+          cx={position.x} cy={position.y} r={11}
+          fill="none" stroke="#ef4444" strokeWidth={1.5} opacity={0.7}
+          className="animate-pulse"
+        />
+      )}
+
+      {/* Main dot */}
+      <circle
+        cx={position.x} cy={position.y} r={r}
+        fill={stopped ? '#ef4444' : '#3b82f6'}
+        stroke={stopped ? '#991b1b' : '#1e3a8a'}
         strokeWidth={1}
       />
-      {/* Part ID label */}
+
+      {/* Part ID label above */}
       <text
-        x={position.x}
-        y={position.y + 4}
-        fontSize={9}
-        fill="white"
-        textAnchor="middle"
-        fontWeight={600}
+        x={position.x} y={position.y - r - 3}
+        fontSize={7} fill={stopped ? '#fca5a5' : '#93c5fd'}
+        textAnchor="middle" fontWeight={600}
       >
         {label}
       </text>
-      {/* Stopped indicator */}
-      {transit.stopped && (
-        <circle
-          cx={position.x + pillWidth / 2 - 2}
-          cy={position.y - pillHeight / 2 + 2}
-          r={3}
-          fill="#ef4444"
-        />
-      )}
     </g>
   );
 }
