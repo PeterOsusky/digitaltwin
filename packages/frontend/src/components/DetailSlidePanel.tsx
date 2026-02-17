@@ -2,6 +2,10 @@ import { useStore } from '../store/useStore.ts';
 import { PartTimeline } from './part-detail/PartTimeline.tsx';
 import { formatTime, formatDuration, shortPartId } from '../utils/format.ts';
 import { sendWsMessage } from '../hooks/useWebSocket.ts';
+import { OkNokPieChart } from './charts/OkNokPieChart.tsx';
+import { StationHealthIndicator } from './charts/StationHealthIndicator.tsx';
+import { STATION_METRIC_CONFIGS } from '../config/station-metrics.ts';
+import type { StationType } from '../types.ts';
 
 const STATUS_BADGES: Record<string, { label: string; color: string }> = {
   in_station: { label: 'In Station', color: 'bg-green-600' },
@@ -66,7 +70,7 @@ export function DetailSlidePanel() {
 
   return (
     <div
-      className="absolute top-0 right-0 h-full w-[380px] z-20 transition-transform duration-300 ease-in-out"
+      className="absolute top-0 right-0 h-full w-[420px] z-20 transition-transform duration-300 ease-in-out"
       style={{ transform: isOpen ? 'translateX(0)' : 'translateX(100%)' }}
     >
       <div className="h-full bg-gray-800/95 backdrop-blur-sm border-l border-gray-700 shadow-2xl overflow-auto">
@@ -322,6 +326,43 @@ function StationDetail({
           </span>
         </div>
       </div>
+
+      {/* OK/NOK/Rework pie chart */}
+      {stationState?.counters && (stationState.counters.ok + stationState.counters.nok + stationState.counters.rework > 0) && (
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Result Distribution</h4>
+          <div className="flex items-center gap-4">
+            <OkNokPieChart counters={stationState.counters} size={90} />
+            <div className="text-xs space-y-1">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                <span className="text-gray-300">OK: {stationState.counters.ok}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                <span className="text-gray-300">NOK: {stationState.counters.nok}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+                <span className="text-gray-300">Rework: {stationState.counters.rework}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Metric sparklines per station type */}
+      {(() => {
+        const metricConfigs = STATION_METRIC_CONFIGS[stationConfig.type as StationType] ?? [];
+        const history = stationState?.metricHistory ?? {};
+        if (metricConfigs.length === 0) return null;
+        return (
+          <div>
+            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Live Metrics</h4>
+            <StationHealthIndicator configs={metricConfigs} metricHistory={history} />
+          </div>
+        );
+      })()}
 
       {/* Recent parts */}
       <div>

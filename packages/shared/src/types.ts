@@ -1,3 +1,28 @@
+// ---- Metric Types ----
+
+export interface MetricSample {
+  value: number;
+  timestamp: string;
+}
+
+export interface StationMetricConfig {
+  metricId: string;
+  label: string;
+  unit: string;
+  nominalMin: number;
+  nominalMax: number;
+  warningMin: number;
+  warningMax: number;
+  baseValue: number;
+  variance: number;
+}
+
+export interface StationCounters {
+  ok: number;
+  nok: number;
+  rework: number;
+}
+
 // ---- Part Tracking ----
 
 export type PartStatus = 'in_station' | 'in_transit' | 'completed' | 'scrapped';
@@ -58,6 +83,8 @@ export interface StationState {
     cycleTime?: number;
     outputCount?: number;
   };
+  metricHistory?: Record<string, MetricSample[]>;
+  counters?: StationCounters;
 }
 
 export interface LineConfig {

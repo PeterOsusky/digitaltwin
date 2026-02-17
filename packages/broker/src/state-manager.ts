@@ -1,17 +1,24 @@
-import type { Part, StationState, SensorState, FactoryLayout, ExitResult, StationStatus, SensorType, SensorDecision } from '@digital-twin/shared';
+import type { Part, StationState, SensorState, FactoryLayout, ExitResult, StationStatus, SensorType, SensorDecision, MetricSample, StationCounters } from '@digital-twin/shared';
 import { FACTORY_LAYOUT } from '@digital-twin/shared';
+
+const METRIC_HISTORY_SIZE = 60;
 
 export class StateManager {
   parts = new Map<string, Part>();
   stations = new Map<string, StationState>();
   sensors = new Map<string, SensorState>();
   layout: FactoryLayout = FACTORY_LAYOUT;
+  /** stationId → metricId → MetricSample[] (ring buffer, max METRIC_HISTORY_SIZE) */
+  metricHistory = new Map<string, Map<string, MetricSample[]>>();
+  /** stationId → OK/NOK/Rework counters */
+  stationCounters = new Map<string, StationCounters>();
 
   constructor() {
     for (const [id] of Object.entries(this.layout.stations)) {
       this.stations.set(id, {
         stationId: id, status: 'idle', currentPartId: null, metrics: { outputCount: 0 },
       });
+      this.stationCounters.set(id, { ok: 0, nok: 0, rework: 0 });
     }
     for (const sensor of this.layout.sensors) {
       this.sensors.set(sensor.sensorId, {
@@ -66,6 +73,15 @@ export class StateManager {
       station.metrics.outputCount = (station.metrics.outputCount ?? 0) + 1;
       station.metrics.cycleTime = cycleTimeMs;
     }
+
+    // Increment OK/NOK/Rework counters
+    const counters = this.stationCounters.get(stationId);
+    if (counters) {
+      if (result === 'ok') counters.ok++;
+      else if (result === 'nok') counters.nok++;
+      else if (result === 'rework') counters.rework++;
+    }
+
     return true;
   }
 
@@ -81,12 +97,26 @@ export class StateManager {
     if (station) { station.status = status; station.currentPartId = currentPartId; }
   }
 
-  handleMetric(stationId: string, metric: string, value: number): void {
+  handleMetric(stationId: string, metric: string, value: number, timestamp: string): void {
     const station = this.stations.get(stationId);
     if (!station) return;
     if (metric === 'temperature') station.metrics.temperature = value;
     else if (metric === 'cycle_time') station.metrics.cycleTime = value;
     else if (metric === 'output_count') station.metrics.outputCount = value;
+
+    // Store in ring buffer history
+    if (!this.metricHistory.has(stationId)) {
+      this.metricHistory.set(stationId, new Map());
+    }
+    const stationHistory = this.metricHistory.get(stationId)!;
+    if (!stationHistory.has(metric)) {
+      stationHistory.set(metric, []);
+    }
+    const samples = stationHistory.get(metric)!;
+    samples.push({ value, timestamp });
+    if (samples.length > METRIC_HISTORY_SIZE) {
+      samples.splice(0, samples.length - METRIC_HISTORY_SIZE);
+    }
   }
 
   handleTransitStart(partId: string, fromStationId: string, toStationId: string, transitTimeMs: number, timestamp: string): boolean {
@@ -122,10 +152,27 @@ export class StateManager {
   }
 
   getInitData() {
+    // Build stations with embedded metricHistory and counters
+    const stationsWithHistory: Record<string, StationState> = {};
+    for (const [id, station] of this.stations) {
+      const history: Record<string, MetricSample[]> = {};
+      const stationHist = this.metricHistory.get(id);
+      if (stationHist) {
+        for (const [metricId, samples] of stationHist) {
+          history[metricId] = samples;
+        }
+      }
+      stationsWithHistory[id] = {
+        ...station,
+        metricHistory: history,
+        counters: this.stationCounters.get(id) ?? { ok: 0, nok: 0, rework: 0 },
+      };
+    }
+
     return {
       parts: [...this.parts.values()],
       layout: this.layout,
-      stations: Object.fromEntries(this.stations),
+      stations: stationsWithHistory,
       sensors: Object.fromEntries(this.sensors),
     };
   }

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Part, PartSensorEvent, StationState, FactoryLayout, LiveEvent, ExitResult, StationStatus, TransitPart, SensorState, SensorDecision } from '../types.ts';
+import type { Part, PartSensorEvent, StationState, FactoryLayout, LiveEvent, ExitResult, StationStatus, TransitPart, SensorState, SensorDecision, MetricSample } from '../types.ts';
 
 let eventCounter = 0;
 let initTimestamp: number | null = null;
@@ -202,7 +202,12 @@ export const useStore = create<AppStore>((set, get) => ({
       const stations = new Map(state.stations);
       const station = stations.get(data.stationId);
       if (station) {
-        stations.set(data.stationId, { ...station, status: 'idle', currentPartId: null });
+        // Increment counters
+        const counters = { ...(station.counters ?? { ok: 0, nok: 0, rework: 0 }) };
+        if (data.result === 'ok') counters.ok++;
+        else if (data.result === 'nok') counters.nok++;
+        else if (data.result === 'rework') counters.rework++;
+        stations.set(data.stationId, { ...station, status: 'idle', currentPartId: null, counters });
       }
 
       const stationName = state.layout?.stations[data.stationId]?.name ?? data.stationId;
@@ -272,7 +277,15 @@ export const useStore = create<AppStore>((set, get) => ({
         if (data.metric === 'temperature') metrics.temperature = data.value;
         else if (data.metric === 'cycle_time') metrics.cycleTime = data.value;
         else if (data.metric === 'output_count') metrics.outputCount = data.value;
-        stations.set(data.stationId, { ...station, metrics });
+
+        // Update metric history ring buffer
+        const metricHistory = { ...(station.metricHistory ?? {}) };
+        const existing = metricHistory[data.metric] ?? [];
+        const sample: MetricSample = { value: data.value, timestamp: new Date().toISOString() };
+        const updated = [...existing, sample];
+        metricHistory[data.metric] = updated.length > 60 ? updated.slice(-60) : updated;
+
+        stations.set(data.stationId, { ...station, metrics, metricHistory });
       }
       return { stations };
     });

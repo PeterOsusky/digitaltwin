@@ -1,3 +1,30 @@
+// ---- Metric Types ----
+
+export interface MetricSample {
+  value: number;
+  timestamp: string;
+}
+
+export interface StationMetricConfig {
+  metricId: string;
+  label: string;
+  unit: string;
+  nominalMin: number;
+  nominalMax: number;
+  warningMin: number;
+  warningMax: number;
+  baseValue: number;
+  variance: number;
+}
+
+export interface StationCounters {
+  ok: number;
+  nok: number;
+  rework: number;
+}
+
+// ---- Core Types ----
+
 export type PartStatus = 'in_station' | 'in_transit' | 'completed' | 'scrapped';
 export type StationStatus = 'online' | 'offline' | 'error' | 'idle' | 'running';
 export type ExitResult = 'ok' | 'nok' | 'rework';
@@ -36,6 +63,8 @@ export interface StationConfig {
 export interface StationState {
   stationId: string; status: StationStatus; currentPartId: string | null;
   metrics: { temperature?: number; cycleTime?: number; outputCount?: number; };
+  metricHistory?: Record<string, MetricSample[]>;
+  counters?: StationCounters;
 }
 
 export interface SensorConfig {

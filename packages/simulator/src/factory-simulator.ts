@@ -1,5 +1,6 @@
 import type { MqttClient } from 'mqtt';
-import { getLineRoutes, FACTORY_LAYOUT } from '@digital-twin/shared';
+import { getLineRoutes, FACTORY_LAYOUT, STATION_METRIC_CONFIGS } from '@digital-twin/shared';
+import type { StationMetricConfig } from '@digital-twin/shared';
 import { SimulatedPart } from './simulated-part.js';
 
 function randomBetween(min: number, max: number): number {
@@ -13,6 +14,8 @@ export class FactorySimulator {
   private createTimer: ReturnType<typeof setTimeout> | null = null;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
   private readonly lines = getLineRoutes();
+  /** Random-walk state: stationId → metricId → current value */
+  private metricState = new Map<string, Map<string, number>>();
 
   constructor(private readonly client: MqttClient) {}
 
@@ -91,19 +94,40 @@ export class FactorySimulator {
 
   private publishMetrics() {
     for (const [id, station] of Object.entries(FACTORY_LAYOUT.stations)) {
-      // Temperature - fluctuate around a base
-      const baseTemp = station.type === 'machine' ? 65 : station.type === 'manual' ? 22 : 35;
-      const temp = baseTemp + (Math.random() - 0.5) * 10;
+      const configs = STATION_METRIC_CONFIGS[station.type] ?? [];
+      if (configs.length === 0) continue;
 
-      this.client.publish(
-        `factory/${station.area}/${station.line}/${id}/metrics/temperature`,
-        JSON.stringify({
-          stationId: id,
-          value: Math.round(temp * 10) / 10,
-          unit: 'celsius',
-          timestamp: new Date().toISOString(),
-        }),
-      );
+      // Ensure we have random-walk state for this station
+      if (!this.metricState.has(id)) {
+        const stationMetrics = new Map<string, number>();
+        for (const cfg of configs) {
+          stationMetrics.set(cfg.metricId, cfg.baseValue);
+        }
+        this.metricState.set(id, stationMetrics);
+      }
+      const stateMap = this.metricState.get(id)!;
+
+      for (const cfg of configs) {
+        // Random walk: drift toward base value with some noise
+        let current = stateMap.get(cfg.metricId) ?? cfg.baseValue;
+        const drift = (cfg.baseValue - current) * 0.1; // mean-reverting
+        const noise = (Math.random() - 0.5) * cfg.variance * 0.4;
+        current = current + drift + noise;
+        // Clamp to reasonable bounds
+        current = Math.max(cfg.warningMin - cfg.variance * 0.2, Math.min(cfg.warningMax + cfg.variance * 0.2, current));
+        current = Math.round(current * 100) / 100;
+        stateMap.set(cfg.metricId, current);
+
+        this.client.publish(
+          `factory/${station.area}/${station.line}/${id}/metrics/${cfg.metricId}`,
+          JSON.stringify({
+            stationId: id,
+            value: current,
+            unit: cfg.unit,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      }
     }
   }
 }
