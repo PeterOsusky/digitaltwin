@@ -5,11 +5,9 @@ import { shortPartId } from '../../utils/format.ts';
 interface Props {
   transit: TransitPart;
   beltPathId: string;
-  isSelected?: boolean;
-  onClick?: () => void;
 }
 
-export function TransitPartChip({ transit, beltPathId, isSelected, onClick }: Props) {
+export function TransitPartChip({ transit, beltPathId }: Props) {
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number>(0);
   const stoppedProgressRef = useRef<number | null>(null);
@@ -59,30 +57,12 @@ export function TransitPartChip({ transit, beltPathId, isSelected, onClick }: Pr
 
   const label = shortPartId(transit.partId);
   const stopped = transit.stopped;
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onClick?.();
-  };
-
   const r = 7;
 
   return (
-    <g onClick={handleClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
-      {/* Invisible hit area for easier clicking */}
-      <circle cx={position.x} cy={position.y} r={14} fill="transparent" />
-
-      {/* Selection ring */}
-      {isSelected && (
-        <circle
-          cx={position.x} cy={position.y} r={12}
-          fill="none" stroke="#60a5fa" strokeWidth={2} opacity={0.8}
-          filter="url(#glow)"
-        />
-      )}
-
+    <g>
       {/* Stopped pulsing ring */}
-      {stopped && !isSelected && (
+      {stopped && (
         <circle
           cx={position.x} cy={position.y} r={11}
           fill="none" stroke="#ef4444" strokeWidth={1.5} opacity={0.7}
@@ -103,6 +83,7 @@ export function TransitPartChip({ transit, beltPathId, isSelected, onClick }: Pr
         x={position.x} y={position.y - r - 3}
         fontSize={7} fill={stopped ? '#fca5a5' : '#93c5fd'}
         textAnchor="middle" fontWeight={600}
+        style={{ pointerEvents: 'none' }}
       >
         {label}
       </text>

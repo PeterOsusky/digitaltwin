@@ -9,11 +9,16 @@ function publish(client: MqttClient, topic: string, payload: Record<string, unkn
   client.publish(topic, JSON.stringify(payload));
 }
 
+const WAIT_POLL_MS = 500;
+
 export class SimulatedPart {
   private progressInterval: ReturnType<typeof setInterval> | null = null;
   private currentProgress = 0;
   public completed = false;
   private pendingTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Track what this part currently holds so destroy() can release */
+  private heldStation: string | null = null;
+  private heldBelt: string | null = null;
 
   constructor(
     public readonly partId: string,
@@ -21,6 +26,8 @@ export class SimulatedPart {
     private readonly area: string,
     private readonly line: string,
     private readonly client: MqttClient,
+    private readonly occupiedStations: Set<string>,
+    private readonly occupiedBelts: Set<string>,
     private readonly onComplete: (partId: string) => void,
   ) {}
 
@@ -37,11 +44,26 @@ export class SimulatedPart {
     return `factory/${s.area}/${s.line}/${s.stationId}`;
   }
 
+  private static beltKey(fromId: string, toId: string): string {
+    return `${fromId}__${toId}`;
+  }
+
   private enterStation(stationIndex: number, skipProcess = false) {
     if (this.completed) return;
 
     const stationId = this.lineStations[stationIndex];
-    const station = this.getStation(stationId);
+
+    // Wait if station is occupied
+    if (this.occupiedStations.has(stationId)) {
+      const timer = setTimeout(() => this.enterStation(stationIndex, skipProcess), WAIT_POLL_MS);
+      this.pendingTimers.push(timer);
+      return;
+    }
+
+    // Claim the station
+    this.occupiedStations.add(stationId);
+    this.heldStation = stationId;
+
     const now = new Date().toISOString();
 
     publish(this.client, `${this.topicBase(stationId)}/part/enter`, {
@@ -59,6 +81,7 @@ export class SimulatedPart {
 
     // Normal processing
     this.currentProgress = 0;
+    const station = this.getStation(stationId);
     const [minTime, maxTime] = station.processingTime;
     const processingTime = randomBetween(minTime, maxTime);
     const progressStep = 100 / (processingTime / 2000);
@@ -101,6 +124,10 @@ export class SimulatedPart {
       area: this.area, line: this.line, result, cycleTimeMs,
     });
 
+    // Release station occupancy
+    this.occupiedStations.delete(stationId);
+    this.heldStation = null;
+
     if (result === 'nok') {
       this.finish();
       return;
@@ -135,6 +162,18 @@ export class SimulatedPart {
     if (this.completed) return;
 
     const toStationId = this.lineStations[nextStationIndex];
+    const beltKey = SimulatedPart.beltKey(fromStationId, toStationId);
+
+    // Wait if belt segment is occupied
+    if (this.occupiedBelts.has(beltKey)) {
+      const timer = setTimeout(() => this.transitToStation(fromStationId, nextStationIndex, transitTime, skipProcess), WAIT_POLL_MS);
+      this.pendingTimers.push(timer);
+      return;
+    }
+
+    // Claim the belt
+    this.occupiedBelts.add(beltKey);
+    this.heldBelt = beltKey;
 
     // Publish transit start
     publish(this.client, `factory/${this.area}/${this.line}/transit/start`, {
@@ -148,19 +187,23 @@ export class SimulatedPart {
       .sort((a, b) => a.positionOnBelt - b.positionOnBelt);
 
     if (sensors.length === 0) {
-      const timer = setTimeout(() => this.enterStation(nextStationIndex, skipProcess), transitTime);
+      const timer = setTimeout(() => {
+        this.occupiedBelts.delete(beltKey);
+        this.heldBelt = null;
+        this.enterStation(nextStationIndex, skipProcess);
+      }, transitTime);
       this.pendingTimers.push(timer);
       return;
     }
 
-    this.evaluateSensorsSequentially(sensors, 0, fromStationId, toStationId, nextStationIndex, transitTime, skipProcess);
+    this.evaluateSensorsSequentially(sensors, 0, fromStationId, toStationId, nextStationIndex, transitTime, skipProcess, beltKey);
   }
 
   private evaluateSensorsSequentially(
     sensors: SensorConfig[], index: number,
     fromStationId: string, toStationId: string,
     nextStationIndex: number, totalTransitTime: number,
-    skipProcess: boolean,
+    skipProcess: boolean, beltKey: string,
   ) {
     if (this.completed) return;
 
@@ -168,7 +211,11 @@ export class SimulatedPart {
       // All sensors passed - finish transit
       const lastPos = sensors[sensors.length - 1].positionOnBelt;
       const remainingTime = Math.max(200, totalTransitTime * (1.0 - lastPos));
-      const timer = setTimeout(() => this.enterStation(nextStationIndex, skipProcess), remainingTime);
+      const timer = setTimeout(() => {
+        this.occupiedBelts.delete(beltKey);
+        this.heldBelt = null;
+        this.enterStation(nextStationIndex, skipProcess);
+      }, remainingTime);
       this.pendingTimers.push(timer);
       return;
     }
@@ -191,11 +238,13 @@ export class SimulatedPart {
 
       switch (decision) {
         case 'pass':
-          this.evaluateSensorsSequentially(sensors, index + 1, fromStationId, toStationId, nextStationIndex, totalTransitTime, skipProcess);
+          this.evaluateSensorsSequentially(sensors, index + 1, fromStationId, toStationId, nextStationIndex, totalTransitTime, skipProcess, beltKey);
           break;
 
         case 'fail':
-          // Data check failed - part stops on belt
+          // Data check failed - part stops on belt, release belt
+          this.occupiedBelts.delete(beltKey);
+          this.heldBelt = null;
           publish(this.client, `factory/${this.area}/${this.line}/transit/stop`, {
             partId: this.partId, fromStationId, toStationId,
             reason: 'sensor_data_check_fail', timestamp: new Date().toISOString(),
@@ -204,13 +253,15 @@ export class SimulatedPart {
           break;
 
         case 'rework':
-          // Routing sensor says go back to fromStation
+          // Routing sensor says go back — release current belt first
+          this.occupiedBelts.delete(beltKey);
+          this.heldBelt = null;
           this.transitToStation(toStationId, this.lineStations.indexOf(fromStationId), randomBetween(3000, 6000));
           break;
 
         case 'skip_process':
           // Continue transit but skip processing at next station
-          this.evaluateSensorsSequentially(sensors, index + 1, fromStationId, toStationId, nextStationIndex, totalTransitTime, true);
+          this.evaluateSensorsSequentially(sensors, index + 1, fromStationId, toStationId, nextStationIndex, totalTransitTime, true, beltKey);
           break;
       }
     }, delayToSensor);
@@ -239,5 +290,14 @@ export class SimulatedPart {
     if (this.progressInterval) clearInterval(this.progressInterval);
     for (const timer of this.pendingTimers) clearTimeout(timer);
     this.pendingTimers = [];
+    // Release any held resources
+    if (this.heldStation) {
+      this.occupiedStations.delete(this.heldStation);
+      this.heldStation = null;
+    }
+    if (this.heldBelt) {
+      this.occupiedBelts.delete(this.heldBelt);
+      this.heldBelt = null;
+    }
   }
 }

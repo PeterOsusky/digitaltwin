@@ -23,19 +23,9 @@ interface AppStore {
   setLayout: (layout: FactoryLayout) => void;
 
   parts: Map<string, Part>;
-  selectedPartId: string | null;
-  selectPart: (partId: string | null) => void;
-
   stations: Map<string, StationState>;
-  selectedStationId: string | null;
-  selectStation: (stationId: string | null) => void;
-
   transitParts: Map<string, TransitPart>;
-
   sensors: Map<string, SensorState>;
-  selectedSensorId: string | null;
-  selectSensor: (sensorId: string | null) => void;
-
   events: LiveEvent[];
 
   // Actions from WebSocket messages
@@ -69,17 +59,9 @@ export const useStore = create<AppStore>((set, get) => ({
   setLayout: (layout) => set({ layout }),
 
   parts: new Map(),
-  selectedPartId: null,
-  selectPart: (partId) => set({ selectedPartId: partId }),
-
   stations: new Map(),
-  selectedStationId: null,
-  selectStation: (stationId) => set({ selectedStationId: stationId }),
-
   transitParts: new Map(),
   sensors: new Map(),
-  selectedSensorId: null,
-  selectSensor: (sensorId) => set({ selectedSensorId: sensorId }),
   events: [],
 
   handleInit: (data) => {
@@ -106,6 +88,7 @@ export const useStore = create<AppStore>((set, get) => ({
       const parts = new Map(state.parts);
       let part = parts.get(data.partId);
       if (!part) {
+        // New part — create it
         part = {
           partId: data.partId,
           createdAt: data.timestamp,
@@ -115,9 +98,9 @@ export const useStore = create<AppStore>((set, get) => ({
           currentLine: data.line,
           progressPct: 0,
         };
-      } else if (part.status === 'completed' || part.status === 'scrapped') {
-        return {};
       } else {
+        // Existing part — always overwrite (including scrapped/completed)
+        // This allows a new record with the same ID to replace a scrapped one
         part = { ...part, status: 'in_station', currentStation: data.stationId, currentArea: data.area, currentLine: data.line, progressPct: 0 };
       }
       parts.set(data.partId, part);
@@ -149,9 +132,6 @@ export const useStore = create<AppStore>((set, get) => ({
     set((state) => {
       const parts = new Map(state.parts);
       const part = parts.get(data.partId);
-      if (part && (part.status === 'completed' || part.status === 'scrapped')) {
-        return {};
-      }
       if (part) {
         const stationConfig = state.layout?.stations[data.stationId];
         let status = part.status;
@@ -268,6 +248,19 @@ export const useStore = create<AppStore>((set, get) => ({
       }
       return { transitParts };
     });
+
+    // Auto-remove stopped transit after 5s so scrapped parts don't stay on belt forever
+    setTimeout(() => {
+      set((state) => {
+        const transitParts = new Map(state.transitParts);
+        const transit = transitParts.get(data.partId);
+        if (transit?.stopped) {
+          transitParts.delete(data.partId);
+          return { transitParts };
+        }
+        return {};
+      });
+    }, 5000);
   },
 
   handleSensorTrigger: (data) => {

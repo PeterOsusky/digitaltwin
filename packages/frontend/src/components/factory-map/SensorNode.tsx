@@ -7,12 +7,6 @@ const TYPE_COLORS: Record<string, string> = {
   process_decision: '#8b5cf6', // purple
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  data_check: 'DC',
-  routing: 'RT',
-  process_decision: 'PD',
-};
-
 const DECISION_LABELS: Record<SensorDecision, string> = {
   pass: 'OK',
   fail: 'FAIL',
@@ -31,11 +25,9 @@ interface Props {
   config: SensorConfig;
   state: SensorState | undefined;
   beltPathId: string;
-  isSelected?: boolean;
-  onClick?: () => void;
 }
 
-export function SensorNode({ config, state, beltPathId, isSelected, onClick }: Props) {
+export function SensorNode({ config, state, beltPathId }: Props) {
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [showDecision, setShowDecision] = useState(false);
   const [flashKey, setFlashKey] = useState(0);
@@ -72,7 +64,6 @@ export function SensorNode({ config, state, beltPathId, isSelected, onClick }: P
   if (!position) return null;
 
   const color = TYPE_COLORS[config.type] ?? '#6b7280';
-  const label = TYPE_LABELS[config.type] ?? '?';
   const size = 6;
 
   // Diamond points
@@ -83,35 +74,8 @@ export function SensorNode({ config, state, beltPathId, isSelected, onClick }: P
     `${position.x - size},${position.y}`,
   ].join(' ');
 
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onClick?.();
-  };
-
   return (
-    <g onClick={handleClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
-      {/* Selection ring */}
-      {isSelected && (
-        <circle
-          cx={position.x}
-          cy={position.y}
-          r={12}
-          fill="none"
-          stroke="#a78bfa"
-          strokeWidth={2}
-          opacity={0.8}
-          filter="url(#glow)"
-        />
-      )}
-
-      {/* Invisible hit area for easier clicking */}
-      <circle
-        cx={position.x}
-        cy={position.y}
-        r={10}
-        fill="transparent"
-      />
-
+    <g>
       {/* Flash circle on trigger */}
       {showDecision && (
         <circle
@@ -129,8 +93,8 @@ export function SensorNode({ config, state, beltPathId, isSelected, onClick }: P
       <polygon
         points={diamondPoints}
         fill={color}
-        stroke={isSelected ? '#a78bfa' : '#111827'}
-        strokeWidth={isSelected ? 2 : 1}
+        stroke="#111827"
+        strokeWidth={1}
         opacity={state?.isActive ? 1 : 0.6}
       />
 

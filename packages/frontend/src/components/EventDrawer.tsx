@@ -20,8 +20,6 @@ const EVENT_ICONS: Record<string, string> = {
 };
 
 function EventRow({ event }: { event: LiveEvent }) {
-  const selectPart = useStore(s => s.selectPart);
-  const selectStation = useStore(s => s.selectStation);
   const color = EVENT_COLORS[event.type] ?? 'text-gray-400';
 
   return (
@@ -30,12 +28,9 @@ function EventRow({ event }: { event: LiveEvent }) {
       <span className={`${color} shrink-0`}>{EVENT_ICONS[event.type]}</span>
       <span className="text-gray-300 flex-1">{event.message}</span>
       {event.partId && (
-        <button
-          onClick={() => { selectPart(event.partId!); selectStation(null); }}
-          className="text-blue-400 hover:text-blue-300 shrink-0"
-        >
+        <span className="text-blue-400 shrink-0">
           {shortPartId(event.partId)}
-        </button>
+        </span>
       )}
     </div>
   );

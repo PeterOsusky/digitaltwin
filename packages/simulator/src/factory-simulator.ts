@@ -17,13 +17,18 @@ const VIRTUAL_METRICS = [
 
 export class FactorySimulator {
   private activeParts = new Map<string, SimulatedPart>();
-  private partCounter = 0;
+  /** Global monotonic counter — seeded from timestamp to ensure uniqueness across restarts */
+  private partCounter = Math.floor(Date.now() / 1000) % 100000;
   private running = false;
   private createTimer: ReturnType<typeof setTimeout> | null = null;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
   private readonly lines = getLineRoutes();
   /** Random-walk state: stationId → metricId → current value */
   private metricState = new Map<string, Map<string, number>>();
+  /** Shared occupancy: only 1 part at a station at a time */
+  readonly occupiedStations = new Set<string>();
+  /** Shared occupancy: only 1 part on a belt segment at a time (key = fromId__toId) */
+  readonly occupiedBelts = new Set<string>();
 
   constructor(private readonly client: MqttClient) {}
 
@@ -98,6 +103,8 @@ export class FactorySimulator {
       line.area,
       line.lineId,
       this.client,
+      this.occupiedStations,
+      this.occupiedBelts,
       (id) => {
         this.activeParts.delete(id);
         console.log(`[simulator] ${id} completed/scrapped (active: ${this.activeParts.size})`);

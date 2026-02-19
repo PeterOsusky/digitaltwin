@@ -26,16 +26,9 @@ interface Props {
 }
 
 export function StationNode({ config, state }: Props) {
-  const selectPart = useStore(s => s.selectPart);
-  const selectStation = useStore(s => s.selectStation);
-  const selectedPartId = useStore(s => s.selectedPartId);
-  const selectedStationId = useStore(s => s.selectedStationId);
-
   const status = state?.status ?? 'offline';
   const partId = state?.currentPartId;
   const isRunning = status === 'running';
-  const isStationSelected = config.stationId === selectedStationId;
-  const isPartSelected = partId && partId === selectedPartId;
   const progress = (() => {
     if (!partId) return 0;
     const parts = useStore.getState().parts;
@@ -48,38 +41,8 @@ export function StationNode({ config, state }: Props) {
   const x = config.position.x - w / 2;
   const y = config.position.y - h / 2;
 
-  const handleStationClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    selectStation(isStationSelected ? null : config.stationId);
-    selectPart(null);
-  };
-
-  const handlePartClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (partId) {
-      selectPart(partId);
-      selectStation(null);
-    }
-  };
-
   return (
     <g>
-      {/* Glow effect for selected station */}
-      {isStationSelected && (
-        <rect
-          x={x - 3}
-          y={y - 3}
-          width={w + 6}
-          height={h + 6}
-          rx={10}
-          fill="none"
-          stroke="#ffffff"
-          strokeWidth={1.5}
-          opacity={0.4}
-          className="station-glow"
-        />
-      )}
-
       {/* Station body */}
       <rect
         x={x}
@@ -89,10 +52,8 @@ export function StationNode({ config, state }: Props) {
         rx={6}
         fill={STATUS_COLORS[status] ?? '#374151'}
         fillOpacity={0.3}
-        stroke={isStationSelected ? '#ffffff' : (STATUS_COLORS[status] ?? '#374151')}
-        strokeWidth={isStationSelected ? 2.5 : 1.5}
-        style={{ cursor: 'pointer' }}
-        onClick={handleStationClick}
+        stroke={STATUS_COLORS[status] ?? '#374151'}
+        strokeWidth={1.5}
       />
 
       {/* Progress bar (inside station) */}
@@ -134,12 +95,9 @@ export function StationNode({ config, state }: Props) {
         {config.name}
       </text>
 
-      {/* Part chip above station */}
+      {/* Part chip above station (read-only label) */}
       {partId && (
-        <g
-          style={{ cursor: 'pointer' }}
-          onClick={handlePartClick}
-        >
+        <g>
           <rect
             x={config.position.x - 22}
             y={y - 17}
@@ -147,8 +105,6 @@ export function StationNode({ config, state }: Props) {
             height={14}
             rx={7}
             fill="#3b82f6"
-            stroke={isPartSelected ? '#fff' : 'none'}
-            strokeWidth={1.5}
           />
           <text
             x={config.position.x}
@@ -157,6 +113,7 @@ export function StationNode({ config, state }: Props) {
             fill="white"
             textAnchor="middle"
             fontWeight={600}
+            style={{ pointerEvents: 'none' }}
           >
             {shortPartId(partId)}
           </text>

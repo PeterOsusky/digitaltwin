@@ -1,27 +1,13 @@
-import { useState, useCallback } from 'react';
 import { useStore } from '../store/useStore.ts';
-import { shortPartId, formatDuration } from '../utils/format.ts';
+import { formatDuration } from '../utils/format.ts';
 import { usePerfStats } from '../hooks/usePerfStats.ts';
 
 export function Header({ onToggleTopics, showTopics }: { onToggleTopics: () => void; showTopics: boolean }) {
   const connected = useStore(s => s.connected);
-  const parts = useStore(s => s.parts);
-  const selectPart = useStore(s => s.selectPart);
-  const selectStation = useStore(s => s.selectStation);
   const getStats = useStore(s => s.getStats);
-  const [query, setQuery] = useState('');
-  const [showResults, setShowResults] = useState(false);
 
   const stats = getStats();
   const perf = usePerfStats();
-
-  const results = useCallback(() => {
-    if (!query.trim()) return [];
-    const q = query.toLowerCase();
-    return [...parts.values()]
-      .filter(p => p.partId.toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [query, parts])();
 
   return (
     <header className="bg-gray-800 border-b border-gray-700 px-4 py-1.5 flex items-center justify-between gap-4">
@@ -65,7 +51,7 @@ export function Header({ onToggleTopics, showTopics }: { onToggleTopics: () => v
         </div>
       )}
 
-      {/* Topics toggle + Search + connection */}
+      {/* Topics toggle + connection */}
       <div className="flex items-center gap-3 shrink-0">
         <button
           onClick={onToggleTopics}
@@ -77,31 +63,6 @@ export function Header({ onToggleTopics, showTopics }: { onToggleTopics: () => v
         >
           Topics
         </button>
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Search part..."
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setShowResults(true); }}
-            onBlur={() => setTimeout(() => setShowResults(false), 200)}
-            onFocus={() => query && setShowResults(true)}
-            className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white placeholder-gray-500 w-36 focus:outline-none focus:border-blue-500"
-          />
-          {showResults && results.length > 0 && (
-            <div className="absolute top-full right-0 mt-1 bg-gray-700 border border-gray-600 rounded shadow-lg z-50 w-56">
-              {results.map(p => (
-                <button
-                  key={p.partId}
-                  onClick={() => { selectPart(p.partId); selectStation(null); setQuery(''); setShowResults(false); }}
-                  className="w-full px-3 py-2 text-left text-xs hover:bg-gray-600 flex justify-between"
-                >
-                  <span className="text-white">{shortPartId(p.partId)}</span>
-                  <span className="text-gray-400">{p.status}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
 
         {/* Connection indicator */}
         <div className="flex items-center gap-1.5">

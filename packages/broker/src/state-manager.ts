@@ -32,9 +32,8 @@ export class StateManager {
         currentStation: stationId, currentArea: area, currentLine: line, progressPct: 0,
       };
       this.parts.set(partId, part);
-    } else if (part.status === 'completed' || part.status === 'scrapped') {
-      return false;
     }
+    // Always overwrite — new data replaces scrapped/completed
     part.status = 'in_station';
     part.currentStation = stationId;
     part.currentArea = area;
@@ -48,7 +47,6 @@ export class StateManager {
   handlePartExit(partId: string, stationId: string, result: ExitResult, cycleTimeMs: number, timestamp: string): boolean {
     const part = this.parts.get(partId);
     if (!part) return false;
-    if (part.status === 'completed' || part.status === 'scrapped') return false;
 
     const stationConfig = this.layout.stations[stationId];
     if (result === 'nok') { part.status = 'scrapped'; part.currentStation = null; }
@@ -94,7 +92,6 @@ export class StateManager {
   handleTransitStart(partId: string, fromStationId: string, toStationId: string, transitTimeMs: number, timestamp: string): boolean {
     const part = this.parts.get(partId);
     if (!part) return false;
-    if (part.status === 'completed' || part.status === 'scrapped') return false;
     part.status = 'in_transit'; part.currentStation = null;
     return true;
   }

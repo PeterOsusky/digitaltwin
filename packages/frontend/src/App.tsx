@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket.ts';
 import { Header } from './components/Header.tsx';
 import { FactoryFloorMap } from './components/factory-map/FactoryFloorMap.tsx';
-import { DetailSlidePanel } from './components/DetailSlidePanel.tsx';
 import { EventDrawer } from './components/EventDrawer.tsx';
 import { TopicDataViewer } from './components/TopicDataViewer.tsx';
 
@@ -19,9 +18,6 @@ export default function App() {
         <div className="absolute inset-0 p-2">
           <FactoryFloorMap />
         </div>
-
-        {/* Detail slide panel (overlay from right) */}
-        <DetailSlidePanel />
 
         {/* Event drawer (overlay from bottom) */}
         <EventDrawer />

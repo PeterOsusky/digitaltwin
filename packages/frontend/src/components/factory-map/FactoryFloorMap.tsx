@@ -21,13 +21,6 @@ export function FactoryFloorMap() {
   const stations = useStore(s => s.stations);
   const sensors = useStore(s => s.sensors);
   const transitParts = useStore(s => s.transitParts);
-  const selectedPartId = useStore(s => s.selectedPartId);
-  const selectedStationId = useStore(s => s.selectedStationId);
-  const selectedSensorId = useStore(s => s.selectedSensorId);
-  const parts = useStore(s => s.parts);
-  const selectPart = useStore(s => s.selectPart);
-  const selectStation = useStore(s => s.selectStation);
-  const selectSensor = useStore(s => s.selectSensor);
 
   if (!layout) {
     return (
@@ -53,29 +46,12 @@ export function FactoryFloorMap() {
   // Collect transit parts as array
   const transitArray = [...transitParts.values()];
 
-  // Highlight current station for selected part
-  const highlightedStationIds = new Set<string>();
-  if (selectedPartId) {
-    const part = parts.get(selectedPartId);
-    if (part?.currentStation) {
-      highlightedStationIds.add(part.currentStation);
-    }
-  }
-
-  // Click on SVG background deselects
-  const handleBgClick = () => {
-    selectPart(null);
-    selectStation(null);
-    selectSensor(null);
-  };
-
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 h-full">
       <svg
         viewBox="0 0 900 570"
         className="w-full h-full"
         style={{ minHeight: 300 }}
-        onClick={handleBgClick}
       >
         <defs>
           <marker id="arrowNormal" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
@@ -138,30 +114,7 @@ export function FactoryFloorMap() {
           );
         })}
 
-        {/* Part current station highlight */}
-
-        {/* Station highlight rings (for part route) */}
-        {highlightedStationIds.size > 0 && [...highlightedStationIds].map(sid => {
-          const sc = layout.stations[sid];
-          if (!sc || sid === selectedStationId) return null;
-          return (
-            <rect
-              key={`hl-${sid}`}
-              x={sc.position.x - 43}
-              y={sc.position.y - 21}
-              width={86}
-              height={42}
-              rx={9}
-              fill="none"
-              stroke="#60a5fa"
-              strokeWidth={1.5}
-              opacity={0.5}
-              filter="url(#glow)"
-            />
-          );
-        })}
-
-        {/* Sensor nodes */}
+        {/* Sensor nodes (read-only) */}
         {layout.sensors.map(sensorConfig => {
           const beltPathId = `belt-${sensorConfig.fromStationId}__${sensorConfig.toStationId}`;
           return (
@@ -170,12 +123,6 @@ export function FactoryFloorMap() {
               config={sensorConfig}
               state={sensors.get(sensorConfig.sensorId)}
               beltPathId={beltPathId}
-              isSelected={selectedSensorId === sensorConfig.sensorId}
-              onClick={() => {
-                selectSensor(sensorConfig.sensorId);
-                selectPart(null);
-                selectStation(null);
-              }}
             />
           );
         })}
@@ -189,7 +136,7 @@ export function FactoryFloorMap() {
           />
         ))}
 
-        {/* Transit part chips */}
+        {/* Transit part chips (read-only) */}
         {transitArray.map(transit => {
           const beltPathId = `belt-${transit.fromStationId}__${transit.toStationId}`;
           return (
@@ -197,12 +144,6 @@ export function FactoryFloorMap() {
               key={transit.partId}
               transit={transit}
               beltPathId={beltPathId}
-              isSelected={selectedPartId === transit.partId}
-              onClick={() => {
-                selectPart(transit.partId);
-                selectStation(null);
-                selectSensor(null);
-              }}
             />
           );
         })}
@@ -219,8 +160,6 @@ export function FactoryFloorMap() {
           <text x={182} y={3} fontSize={9} fill="#9ca3af">Rework</text>
           <polygon points="230,0 235,-5 240,0 235,5" fill="#3b82f6" />
           <text x={245} y={3} fontSize={9} fill="#9ca3af">Sensor</text>
-          <line x1={290} y1={0} x2={306} y2={0} stroke="#60a5fa" strokeWidth={2.5} opacity={0.5} />
-          <text x={310} y={3} fontSize={9} fill="#9ca3af">Route</text>
         </g>
       </svg>
     </div>
