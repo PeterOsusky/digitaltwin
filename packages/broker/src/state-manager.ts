@@ -1,15 +1,11 @@
-import type { Part, StationState, SensorState, FactoryLayout, ExitResult, StationStatus, SensorType, SensorDecision, MetricSample, StationCounters } from '@digital-twin/shared';
+import type { Part, StationState, SensorState, FactoryLayout, ExitResult, StationStatus, SensorType, SensorDecision, StationCounters } from '@digital-twin/shared';
 import { FACTORY_LAYOUT } from '@digital-twin/shared';
-
-const METRIC_HISTORY_SIZE = 60;
 
 export class StateManager {
   parts = new Map<string, Part>();
   stations = new Map<string, StationState>();
   sensors = new Map<string, SensorState>();
   layout: FactoryLayout = FACTORY_LAYOUT;
-  /** stationId → metricId → MetricSample[] (ring buffer, max METRIC_HISTORY_SIZE) */
-  metricHistory = new Map<string, Map<string, MetricSample[]>>();
   /** stationId → OK/NOK/Rework counters */
   stationCounters = new Map<string, StationCounters>();
 
@@ -33,21 +29,17 @@ export class StateManager {
     if (!part) {
       part = {
         partId, createdAt: timestamp, status: 'in_station',
-        currentStation: stationId, currentArea: area, currentLine: line, history: [],
+        currentStation: stationId, currentArea: area, currentLine: line, progressPct: 0,
       };
       this.parts.set(partId, part);
     } else if (part.status === 'completed' || part.status === 'scrapped') {
-      // Completed/scrapped parts must NEVER re-enter production
       return false;
     }
     part.status = 'in_station';
     part.currentStation = stationId;
     part.currentArea = area;
     part.currentLine = line;
-    part.history.push({
-      stationId, area, line, enteredAt: timestamp,
-      exitedAt: null, result: null, cycleTimeMs: null, progressPct: 0,
-    });
+    part.progressPct = 0;
     const station = this.stations.get(stationId);
     if (station) { station.status = 'running'; station.currentPartId = partId; }
     return true;
@@ -57,15 +49,12 @@ export class StateManager {
     const part = this.parts.get(partId);
     if (!part) return false;
     if (part.status === 'completed' || part.status === 'scrapped') return false;
-    const entry = [...part.history].reverse().find(h => h.stationId === stationId && !h.exitedAt);
-    if (entry) {
-      entry.exitedAt = timestamp; entry.result = result;
-      entry.cycleTimeMs = cycleTimeMs; entry.progressPct = 100;
-    }
+
     const stationConfig = this.layout.stations[stationId];
     if (result === 'nok') { part.status = 'scrapped'; part.currentStation = null; }
     else if (stationConfig && stationConfig.nextStations.length === 0) { part.status = 'completed'; part.currentStation = null; }
     else { part.status = 'in_transit'; part.currentStation = null; }
+    part.progressPct = 100;
 
     const station = this.stations.get(stationId);
     if (station) {
@@ -74,7 +63,6 @@ export class StateManager {
       station.metrics.cycleTime = cycleTimeMs;
     }
 
-    // Increment OK/NOK/Rework counters
     const counters = this.stationCounters.get(stationId);
     if (counters) {
       if (result === 'ok') counters.ok++;
@@ -87,9 +75,7 @@ export class StateManager {
 
   handlePartProcess(partId: string, stationId: string, progressPct: number): void {
     const part = this.parts.get(partId);
-    if (!part) return;
-    const entry = [...part.history].reverse().find(h => h.stationId === stationId && !h.exitedAt);
-    if (entry) entry.progressPct = progressPct;
+    if (part) part.progressPct = progressPct;
   }
 
   handleStationStatus(stationId: string, status: StationStatus, currentPartId: string | null): void {
@@ -97,26 +83,12 @@ export class StateManager {
     if (station) { station.status = status; station.currentPartId = currentPartId; }
   }
 
-  handleMetric(stationId: string, metric: string, value: number, timestamp: string): void {
+  handleMetric(stationId: string, metric: string, value: number): void {
     const station = this.stations.get(stationId);
     if (!station) return;
     if (metric === 'temperature') station.metrics.temperature = value;
     else if (metric === 'cycle_time') station.metrics.cycleTime = value;
     else if (metric === 'output_count') station.metrics.outputCount = value;
-
-    // Store in ring buffer history
-    if (!this.metricHistory.has(stationId)) {
-      this.metricHistory.set(stationId, new Map());
-    }
-    const stationHistory = this.metricHistory.get(stationId)!;
-    if (!stationHistory.has(metric)) {
-      stationHistory.set(metric, []);
-    }
-    const samples = stationHistory.get(metric)!;
-    samples.push({ value, timestamp });
-    if (samples.length > METRIC_HISTORY_SIZE) {
-      samples.splice(0, samples.length - METRIC_HISTORY_SIZE);
-    }
   }
 
   handleTransitStart(partId: string, fromStationId: string, toStationId: string, transitTimeMs: number, timestamp: string): boolean {
@@ -143,28 +115,11 @@ export class StateManager {
     }
   }
 
-  handlePartOverride(partId: string): Part | null {
-    const part = this.parts.get(partId);
-    if (!part) return null;
-    // Reset from scrapped → in_transit so the part can continue
-    part.status = 'in_transit';
-    return part;
-  }
-
   getInitData() {
-    // Build stations with embedded metricHistory and counters
-    const stationsWithHistory: Record<string, StationState> = {};
+    const stationsObj: Record<string, StationState> = {};
     for (const [id, station] of this.stations) {
-      const history: Record<string, MetricSample[]> = {};
-      const stationHist = this.metricHistory.get(id);
-      if (stationHist) {
-        for (const [metricId, samples] of stationHist) {
-          history[metricId] = samples;
-        }
-      }
-      stationsWithHistory[id] = {
+      stationsObj[id] = {
         ...station,
-        metricHistory: history,
         counters: this.stationCounters.get(id) ?? { ok: 0, nok: 0, rework: 0 },
       };
     }
@@ -172,7 +127,7 @@ export class StateManager {
     return {
       parts: [...this.parts.values()],
       layout: this.layout,
-      stations: stationsWithHistory,
+      stations: stationsObj,
       sensors: Object.fromEntries(this.sensors),
     };
   }

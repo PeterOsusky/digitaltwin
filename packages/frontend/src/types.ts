@@ -1,10 +1,5 @@
 // ---- Metric Types ----
 
-export interface MetricSample {
-  value: number;
-  timestamp: string;
-}
-
 export interface StationMetricConfig {
   metricId: string;
   label: string;
@@ -33,22 +28,14 @@ export type StationType = 'load' | 'machine' | 'inspection' | 'measure' | 'buffe
 export type SensorType = 'data_check' | 'routing' | 'process_decision';
 export type SensorDecision = 'pass' | 'fail' | 'rework' | 'skip_process';
 
-export interface PartSensorEvent {
-  sensorId: string; type: SensorType; decision: SensorDecision;
-  timestamp: string; fromStationId: string; toStationId: string;
-}
-
-export interface PartHistoryEntry {
-  stationId: string; area: string; line: string;
-  enteredAt: string; exitedAt: string | null;
-  result: ExitResult | null; cycleTimeMs: number | null; progressPct: number;
-}
-
 export interface Part {
-  partId: string; createdAt: string; status: PartStatus;
-  currentStation: string | null; currentArea: string | null; currentLine: string | null;
-  history: PartHistoryEntry[];
-  sensorEvents: PartSensorEvent[];
+  partId: string;
+  createdAt: string;
+  status: PartStatus;
+  currentStation: string | null;
+  currentArea: string | null;
+  currentLine: string | null;
+  progressPct: number;
 }
 
 export interface StationPosition { x: number; y: number; }
@@ -63,7 +50,6 @@ export interface StationConfig {
 export interface StationState {
   stationId: string; status: StationStatus; currentPartId: string | null;
   metrics: { temperature?: number; cycleTime?: number; outputCount?: number; };
-  metricHistory?: Record<string, MetricSample[]>;
   counters?: StationCounters;
 }
 
@@ -109,5 +95,4 @@ export type WsMessage =
   | { type: 'part_created'; data: Part }
   | { type: 'transit_start'; data: { partId: string; fromStationId: string; toStationId: string; transitTimeMs: number; timestamp: string } }
   | { type: 'transit_stop'; data: { partId: string; fromStationId: string; toStationId: string; reason: string; timestamp: string } }
-  | { type: 'sensor_trigger'; data: { sensorId: string; partId: string; type: SensorType; decision: SensorDecision; timestamp: string; fromStationId: string; toStationId: string } }
-  | { type: 'part_override'; data: { partId: string; timestamp: string } };
+  | { type: 'sensor_trigger'; data: { sensorId: string; partId: string; type: SensorType; decision: SensorDecision; timestamp: string; fromStationId: string; toStationId: string } };

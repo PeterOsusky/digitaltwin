@@ -40,9 +40,7 @@ export function StationNode({ config, state }: Props) {
     if (!partId) return 0;
     const parts = useStore.getState().parts;
     const part = parts.get(partId);
-    if (!part) return 0;
-    const last = part.history[part.history.length - 1];
-    return last?.progressPct ?? 0;
+    return part?.progressPct ?? 0;
   })();
 
   const w = 80;

@@ -1,11 +1,6 @@
 import { useStore } from '../store/useStore.ts';
-import { PartTimeline } from './part-detail/PartTimeline.tsx';
 import { formatTime, formatDuration, shortPartId } from '../utils/format.ts';
-import { sendWsMessage } from '../hooks/useWebSocket.ts';
 import { OkNokPieChart } from './charts/OkNokPieChart.tsx';
-import { StationHealthIndicator } from './charts/StationHealthIndicator.tsx';
-import { STATION_METRIC_CONFIGS } from '../config/station-metrics.ts';
-import type { StationType } from '../types.ts';
 
 const STATUS_BADGES: Record<string, { label: string; color: string }> = {
   in_station: { label: 'In Station', color: 'bg-green-600' },
@@ -19,12 +14,6 @@ const STATION_STATUS_COLORS: Record<string, string> = {
   idle: 'text-gray-400',
   error: 'text-red-400',
   offline: 'text-gray-600',
-};
-
-const RESULT_COLORS: Record<string, string> = {
-  ok: 'text-green-400',
-  rework: 'text-amber-400',
-  nok: 'text-red-400',
 };
 
 const DECISION_COLORS: Record<string, string> = {
@@ -47,12 +36,10 @@ export function DetailSlidePanel() {
   const parts = useStore(s => s.parts);
   const stations = useStore(s => s.stations);
   const sensors = useStore(s => s.sensors);
-  const transitParts = useStore(s => s.transitParts);
   const layout = useStore(s => s.layout);
   const selectPart = useStore(s => s.selectPart);
   const selectStation = useStore(s => s.selectStation);
   const selectSensor = useStore(s => s.selectSensor);
-  const getStationHistory = useStore(s => s.getStationHistory);
 
   const isOpen = selectedPartId !== null || selectedStationId !== null || selectedSensorId !== null;
 
@@ -62,7 +49,6 @@ export function DetailSlidePanel() {
     selectSensor(null);
   };
 
-  // Determine title
   let title = 'Detail';
   if (selectedPartId) title = 'Part Detail';
   else if (selectedStationId) title = 'Station Detail';
@@ -74,7 +60,6 @@ export function DetailSlidePanel() {
       style={{ transform: isOpen ? 'translateX(0)' : 'translateX(100%)' }}
     >
       <div className="h-full bg-gray-800/95 backdrop-blur-sm border-l border-gray-700 shadow-2xl overflow-auto">
-        {/* Close button */}
         <div className="sticky top-0 bg-gray-800/95 backdrop-blur-sm z-10 flex items-center justify-between px-4 py-3 border-b border-gray-700">
           <h3 className="text-sm font-bold text-white">{title}</h3>
           <button
@@ -90,29 +75,24 @@ export function DetailSlidePanel() {
             <PartDetail
               partId={selectedPartId}
               parts={parts}
-              transitParts={transitParts}
-              sensors={sensors}
               layout={layout}
               selectStation={selectStation}
               selectPart={selectPart}
-              selectSensor={selectSensor}
             />
           )}
           {selectedStationId && !selectedPartId && (
             <StationDetail
               stationId={selectedStationId}
               stations={stations}
+              parts={parts}
               layout={layout}
-              getStationHistory={getStationHistory}
               selectPart={selectPart}
-              selectStation={selectStation}
             />
           )}
           {selectedSensorId && !selectedPartId && !selectedStationId && (
             <SensorDetail
               sensorId={selectedSensorId}
               sensors={sensors}
-              parts={parts}
               layout={layout}
               selectPart={selectPart}
               selectStation={selectStation}
@@ -124,37 +104,22 @@ export function DetailSlidePanel() {
   );
 }
 
-// ---- Part Detail sub-component ----
+// ---- Part Detail ----
 
 function PartDetail({
-  partId, parts, transitParts, sensors, layout, selectStation, selectPart, selectSensor,
+  partId, parts, layout, selectStation, selectPart,
 }: {
   partId: string;
   parts: Map<string, import('../types.ts').Part>;
-  transitParts: Map<string, import('../types.ts').TransitPart>;
-  sensors: Map<string, import('../types.ts').SensorState>;
   layout: import('../types.ts').FactoryLayout | null;
   selectStation: (id: string | null) => void;
   selectPart: (id: string | null) => void;
-  selectSensor: (id: string | null) => void;
 }) {
   const part = parts.get(partId);
   if (!part) return <p className="text-gray-500 text-sm">Part not found</p>;
 
   const badge = STATUS_BADGES[part.status] ?? STATUS_BADGES.in_transit;
   const currentStationConfig = part.currentStation ? layout?.stations[part.currentStation] : null;
-
-  // Check if part is stopped at a sensor (transit stopped = true)
-  const transit = transitParts.get(partId);
-  const isStoppedAtSensor = transit?.stopped === true;
-
-  // Find the sensor that stopped this part
-  const lastFailEvent = part.sensorEvents?.length
-    ? [...part.sensorEvents].reverse().find(se => se.decision === 'fail')
-    : null;
-  const failSensorConfig = lastFailEvent
-    ? layout?.sensors.find(s => s.sensorId === lastFailEvent.sensorId)
-    : null;
 
   return (
     <div className="space-y-4">
@@ -168,46 +133,6 @@ function PartDetail({
         </div>
         <p className="text-xs text-gray-500 font-mono">{part.partId}</p>
       </div>
-
-      {/* Stopped at sensor alert — only show when part is currently scrapped/stopped */}
-      {(isStoppedAtSensor || (lastFailEvent && part.status === 'scrapped')) && (
-        <div className="bg-red-900/40 border border-red-700/60 rounded p-3">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-red-400 font-bold text-xs">⚠ STOPPED AT SENSOR</span>
-          </div>
-          {failSensorConfig && (
-            <button
-              onClick={() => { selectSensor(failSensorConfig.sensorId); selectPart(null); }}
-              className="text-red-300 hover:text-red-200 text-xs font-semibold underline"
-            >
-              {failSensorConfig.displayId} ({SENSOR_TYPE_LABELS[failSensorConfig.type] ?? failSensorConfig.type})
-            </button>
-          )}
-          {lastFailEvent && (
-            <p className="text-xs text-gray-400 mt-1">
-              Failed at {formatTime(lastFailEvent.timestamp)}
-              {' · '}
-              {layout?.stations[lastFailEvent.fromStationId]?.displayId ?? lastFailEvent.fromStationId}
-              {' → '}
-              {layout?.stations[lastFailEvent.toStationId]?.displayId ?? lastFailEvent.toStationId}
-            </p>
-          )}
-          <button
-            onClick={() => {
-              sendWsMessage({
-                type: 'override_part',
-                partId,
-                fromStationId: lastFailEvent?.fromStationId ?? transit?.fromStationId,
-                toStationId: lastFailEvent?.toStationId ?? transit?.toStationId,
-                failedSensorId: lastFailEvent?.sensorId,
-              });
-            }}
-            className="mt-2 w-full bg-green-700 hover:bg-green-600 text-white text-xs font-bold py-1.5 px-3 rounded transition-colors"
-          >
-            ✓ Override OK — pokračovať
-          </button>
-        </div>
-      )}
 
       {/* Info grid */}
       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -226,54 +151,46 @@ function PartDetail({
           <span className="text-gray-400 block">Created</span>
           <span className="text-white">{formatTime(part.createdAt)}</span>
         </div>
-        <div className="bg-gray-700/50 rounded p-2">
-          <span className="text-gray-400 block">Steps</span>
-          <span className="text-white font-semibold">{part.history.length}</span>
-        </div>
-        <div className="bg-gray-700/50 rounded p-2">
-          <span className="text-gray-400 block">Area</span>
-          <span className="text-white capitalize">{part.currentArea ?? part.history[0]?.area ?? '-'}</span>
-        </div>
-        {part.sensorEvents && part.sensorEvents.length > 0 && (
+        {part.status === 'in_station' && (
           <div className="bg-gray-700/50 rounded p-2">
-            <span className="text-gray-400 block">Sensor Checks</span>
-            <span className="text-white font-semibold">{part.sensorEvents.length}</span>
+            <span className="text-gray-400 block">Progress</span>
+            <div className="flex items-center gap-2">
+              <span className="text-white font-bold">{part.progressPct}%</span>
+              <div className="flex-1 bg-gray-600 rounded-full h-1.5">
+                <div className="bg-green-500 h-1.5 rounded-full transition-all" style={{ width: `${part.progressPct}%` }} />
+              </div>
+            </div>
           </div>
         )}
-      </div>
-
-      {/* Timeline */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Journey History</h4>
-        <PartTimeline
-          history={part.history}
-          sensorEvents={part.sensorEvents ?? []}
-          layout={layout}
-        />
+        <div className="bg-gray-700/50 rounded p-2">
+          <span className="text-gray-400 block">Area</span>
+          <span className="text-white capitalize">{part.currentArea ?? '-'}</span>
+        </div>
       </div>
     </div>
   );
 }
 
-// ---- Station Detail sub-component ----
+// ---- Station Detail ----
 
 function StationDetail({
-  stationId, stations, layout, getStationHistory, selectPart, selectStation,
+  stationId, stations, parts, layout, selectPart,
 }: {
   stationId: string;
   stations: Map<string, import('../types.ts').StationState>;
+  parts: Map<string, import('../types.ts').Part>;
   layout: import('../types.ts').FactoryLayout | null;
-  getStationHistory: (id: string) => import('../types.ts').Part[];
   selectPart: (id: string | null) => void;
-  selectStation: (id: string | null) => void;
 }) {
   const stationConfig = layout?.stations[stationId];
   const stationState = stations.get(stationId);
-  const stationParts = getStationHistory(stationId);
 
   if (!stationConfig) return <p className="text-gray-500 text-sm">Station not found</p>;
 
   const statusColor = STATION_STATUS_COLORS[stationState?.status ?? 'offline'] ?? 'text-gray-500';
+
+  // Find the current part at this station
+  const currentPart = stationState?.currentPartId ? parts.get(stationState.currentPartId) : null;
 
   return (
     <div className="space-y-4">
@@ -295,15 +212,23 @@ function StationDetail({
       </div>
 
       {/* Current part */}
-      {stationState?.currentPartId && (
+      {currentPart && (
         <div className="bg-blue-900/30 border border-blue-700/50 rounded p-2">
           <span className="text-xs text-gray-400">Currently processing: </span>
           <button
-            onClick={() => { selectPart(stationState.currentPartId!); selectStation(null); }}
+            onClick={() => selectPart(currentPart.partId)}
             className="text-blue-400 hover:text-blue-300 text-xs font-semibold"
           >
-            {shortPartId(stationState.currentPartId)}
+            {shortPartId(currentPart.partId)}
           </button>
+          {currentPart.progressPct > 0 && currentPart.progressPct < 100 && (
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="flex-1 bg-gray-600 rounded-full h-1.5">
+                <div className="bg-green-500 h-1.5 rounded-full transition-all" style={{ width: `${currentPart.progressPct}%` }} />
+              </div>
+              <span className="text-xs text-gray-400">{currentPart.progressPct}%</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -350,70 +275,17 @@ function StationDetail({
           </div>
         </div>
       )}
-
-      {/* Metric sparklines per station type */}
-      {(() => {
-        const metricConfigs = STATION_METRIC_CONFIGS[stationConfig.type as StationType] ?? [];
-        const history = stationState?.metricHistory ?? {};
-        if (metricConfigs.length === 0) return null;
-        return (
-          <div>
-            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Live Metrics</h4>
-            <StationHealthIndicator configs={metricConfigs} metricHistory={history} />
-          </div>
-        );
-      })()}
-
-      {/* Recent parts */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">
-          Recent Parts ({stationParts.length})
-        </h4>
-        {stationParts.length === 0 ? (
-          <p className="text-gray-500 text-xs">No parts have passed through yet</p>
-        ) : (
-          <div className="space-y-1 max-h-[400px] overflow-auto">
-            {stationParts.map(p => {
-              const entry = [...p.history].reverse().find(h => h.stationId === stationId);
-              if (!entry) return null;
-              return (
-                <button
-                  key={p.partId}
-                  onClick={() => { selectPart(p.partId); selectStation(null); }}
-                  className="w-full flex items-center justify-between text-xs bg-gray-700/30 hover:bg-gray-700/60 rounded px-2 py-1.5 transition-colors"
-                >
-                  <span className="text-blue-400 font-semibold">{shortPartId(p.partId)}</span>
-                  <div className="flex items-center gap-2">
-                    {entry.result && (
-                      <span className={`font-bold ${RESULT_COLORS[entry.result] ?? 'text-gray-400'}`}>
-                        {entry.result.toUpperCase()}
-                      </span>
-                    )}
-                    {entry.cycleTimeMs != null && (
-                      <span className="text-gray-500">{formatDuration(entry.cycleTimeMs)}</span>
-                    )}
-                    {!entry.exitedAt && (
-                      <span className="text-green-400 font-bold animate-pulse">ACTIVE</span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
-// ---- Sensor Detail sub-component ----
+// ---- Sensor Detail ----
 
 function SensorDetail({
-  sensorId, sensors, parts, layout, selectPart, selectStation,
+  sensorId, sensors, layout, selectPart, selectStation,
 }: {
   sensorId: string;
   sensors: Map<string, import('../types.ts').SensorState>;
-  parts: Map<string, import('../types.ts').Part>;
   layout: import('../types.ts').FactoryLayout | null;
   selectPart: (id: string | null) => void;
   selectStation: (id: string | null) => void;
@@ -425,23 +297,6 @@ function SensorDetail({
 
   const fromStation = layout?.stations[sensorConfig.fromStationId];
   const toStation = layout?.stations[sensorConfig.toStationId];
-
-  // Recent events for this sensor across all parts
-  const recentEvents: Array<{ partId: string; decision: string; timestamp: string }> = [];
-  for (const part of parts.values()) {
-    for (const se of (part.sensorEvents ?? [])) {
-      if (se.sensorId === sensorId) {
-        recentEvents.push({ partId: part.partId, decision: se.decision, timestamp: se.timestamp });
-      }
-    }
-  }
-  recentEvents.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  const displayEvents = recentEvents.slice(0, 30);
-
-  const totalChecks = recentEvents.length;
-  const failCount = recentEvents.filter(e => e.decision === 'fail').length;
-  const passCount = recentEvents.filter(e => e.decision === 'pass').length;
-  const reworkCount = recentEvents.filter(e => e.decision === 'rework').length;
 
   return (
     <div className="space-y-4">
@@ -465,16 +320,16 @@ function SensorDetail({
         <div className="flex items-center gap-2">
           {fromStation && (
             <button
-              onClick={() => { selectStation(fromStation.stationId); }}
+              onClick={() => selectStation(fromStation.stationId)}
               className="text-blue-400 hover:text-blue-300 font-semibold"
             >
               #{fromStation.displayId} {fromStation.name}
             </button>
           )}
-          <span className="text-gray-500">→</span>
+          <span className="text-gray-500">&rarr;</span>
           {toStation && (
             <button
-              onClick={() => { selectStation(toStation.stationId); }}
+              onClick={() => selectStation(toStation.stationId)}
               className="text-blue-400 hover:text-blue-300 font-semibold"
             >
               #{toStation.displayId} {toStation.name}
@@ -490,29 +345,7 @@ function SensorDetail({
         <span className="text-gray-500 text-[10px]">{Math.round(sensorConfig.positionOnBelt * 100)}% along belt</span>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="bg-gray-700/50 rounded p-2 text-center">
-          <span className="text-gray-400 block">Total Checks</span>
-          <span className="text-white font-bold text-sm">{totalChecks}</span>
-        </div>
-        <div className="bg-gray-700/50 rounded p-2 text-center">
-          <span className="text-gray-400 block">Fail Rate</span>
-          <span className="text-red-400 font-bold text-sm">
-            {totalChecks > 0 ? `${((failCount / totalChecks) * 100).toFixed(1)}%` : '-'}
-          </span>
-        </div>
-        <div className="bg-gray-700/50 rounded p-2 text-center">
-          <span className="text-gray-400 block">Pass</span>
-          <span className="text-green-400 font-bold text-sm">{passCount}</span>
-        </div>
-        <div className="bg-gray-700/50 rounded p-2 text-center">
-          <span className="text-gray-400 block">Rework</span>
-          <span className="text-amber-400 font-bold text-sm">{reworkCount}</span>
-        </div>
-      </div>
-
-      {/* Fail probability config */}
+      {/* Config */}
       <div className="bg-gray-700/50 rounded p-2 text-xs">
         <span className="text-gray-400">Fail Probability: </span>
         <span className="text-white font-bold">{(sensorConfig.failProbability * 100).toFixed(1)}%</span>
@@ -530,7 +363,7 @@ function SensorDetail({
           )}
           {sensorState.lastPartId && (
             <button
-              onClick={() => { selectPart(sensorState.lastPartId!); }}
+              onClick={() => selectPart(sensorState.lastPartId!)}
               className="ml-2 text-blue-400 hover:text-blue-300 font-semibold"
             >
               {shortPartId(sensorState.lastPartId)}
@@ -538,34 +371,6 @@ function SensorDetail({
           )}
         </div>
       )}
-
-      {/* Recent events */}
-      <div>
-        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">
-          Recent Events ({displayEvents.length})
-        </h4>
-        {displayEvents.length === 0 ? (
-          <p className="text-gray-500 text-xs">No events yet</p>
-        ) : (
-          <div className="space-y-1 max-h-[300px] overflow-auto">
-            {displayEvents.map((evt, i) => (
-              <button
-                key={`${evt.partId}-${i}`}
-                onClick={() => selectPart(evt.partId)}
-                className="w-full flex items-center justify-between text-xs bg-gray-700/30 hover:bg-gray-700/60 rounded px-2 py-1.5 transition-colors"
-              >
-                <span className="text-blue-400 font-semibold">{shortPartId(evt.partId)}</span>
-                <div className="flex items-center gap-2">
-                  <span className={`font-bold ${DECISION_COLORS[evt.decision] ?? 'text-gray-400'}`}>
-                    {evt.decision.toUpperCase()}
-                  </span>
-                  <span className="text-gray-500 text-[10px] font-mono">{formatTime(evt.timestamp)}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

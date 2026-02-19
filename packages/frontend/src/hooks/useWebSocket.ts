@@ -1,20 +1,18 @@
 import { useEffect } from 'react';
 import { useStore } from '../store/useStore.ts';
+import { pushMetric, flushMetrics, getTotalReceived, getTopicCount } from '../store/metricBuffer.ts';
+import { recordFlush } from '../store/perfStats.ts';
 import type { WsMessage } from '../types.ts';
 
 const WS_URL = 'ws://localhost:3001';
 const RECONNECT_DELAY = 3000;
+const METRIC_FLUSH_INTERVAL = 500; // ms
 
 // Singleton WS — only one connection at a time
 let globalWs: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let flushTimer: ReturnType<typeof setInterval> | null = null;
 let isConnecting = false;
-
-export function sendWsMessage(msg: Record<string, unknown>) {
-  if (globalWs && globalWs.readyState === WebSocket.OPEN) {
-    globalWs.send(JSON.stringify(msg));
-  }
-}
 
 function cleanup() {
   if (reconnectTimer) {
@@ -22,7 +20,6 @@ function cleanup() {
     reconnectTimer = null;
   }
   if (globalWs) {
-    // Remove all listeners before closing to prevent reconnect from onclose
     globalWs.onopen = null;
     globalWs.onclose = null;
     globalWs.onerror = null;
@@ -33,15 +30,32 @@ function cleanup() {
   isConnecting = false;
 }
 
+function startMetricFlushLoop() {
+  if (flushTimer) return; // Already running
+  flushTimer = setInterval(() => {
+    const batch = flushMetrics();
+    if (batch.length === 0) return;
+
+    const t0 = performance.now();
+    useStore.getState().handleMetricFlush(batch);
+    const dt = performance.now() - t0;
+
+    const uniqueStations = new Set(batch.map(m => m.stationId)).size;
+    recordFlush(batch.length, uniqueStations, dt, getTotalReceived(), getTopicCount());
+
+    if (batch.length > 50) {
+      console.log(`[perf] metric flush: ${batch.length} metrics (${uniqueStations} stations), store update: ${dt.toFixed(1)}ms`);
+    }
+  }, METRIC_FLUSH_INTERVAL);
+}
+
 function startConnection() {
   if (isConnecting || (globalWs && globalWs.readyState === WebSocket.OPEN)) {
-    return; // Already connected or connecting
+    return;
   }
 
   cleanup();
   isConnecting = true;
-
-  const store = useStore.getState();
 
   const ws = new WebSocket(WS_URL);
   globalWs = ws;
@@ -50,6 +64,7 @@ function startConnection() {
     console.log('[ws] Connected to backend');
     isConnecting = false;
     useStore.getState().setConnected(true);
+    startMetricFlushLoop();
   };
 
   ws.onclose = () => {
@@ -85,7 +100,8 @@ function startConnection() {
         s.handleStationStatus(msg.data);
         break;
       case 'metric_update':
-        s.handleMetricUpdate(msg.data);
+        // Push to FE buffer — flushed into Zustand every 500ms
+        pushMetric(msg.data);
         break;
       case 'transit_start':
         s.handleTransitStart(msg.data);
@@ -96,9 +112,6 @@ function startConnection() {
       case 'sensor_trigger':
         s.handleSensorTrigger(msg.data);
         break;
-      case 'part_override':
-        s.handlePartOverride(msg.data);
-        break;
     }
   };
 }
@@ -106,11 +119,6 @@ function startConnection() {
 export function useWebSocket() {
   useEffect(() => {
     startConnection();
-
-    // Cleanup only on full unmount (not on HMR re-render)
-    return () => {
-      // Don't cleanup on HMR — we want to keep the singleton alive
-      // Only cleanup on actual app unmount
-    };
+    return () => {};
   }, []);
 }

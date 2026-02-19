@@ -53,14 +53,12 @@ export function FactoryFloorMap() {
   // Collect transit parts as array
   const transitArray = [...transitParts.values()];
 
-  // Compute highlighted station IDs for part route trace
+  // Highlight current station for selected part
   const highlightedStationIds = new Set<string>();
   if (selectedPartId) {
     const part = parts.get(selectedPartId);
-    if (part) {
-      for (const h of part.history) {
-        highlightedStationIds.add(h.stationId);
-      }
+    if (part?.currentStation) {
+      highlightedStationIds.add(part.currentStation);
     }
   }
 
@@ -140,41 +138,7 @@ export function FactoryFloorMap() {
           );
         })}
 
-        {/* Part route highlight (draw highlighted belts on top) */}
-        {selectedPartId && highlightedStationIds.size > 1 && (() => {
-          const part = parts.get(selectedPartId);
-          if (!part) return null;
-          // Build ordered route pairs
-          const routePairs: Array<[string, string]> = [];
-          for (let i = 0; i < part.history.length - 1; i++) {
-            routePairs.push([part.history[i].stationId, part.history[i + 1].stationId]);
-          }
-          return routePairs.map(([fromId, toId], idx) => {
-            const from = layout.stations[fromId];
-            const to = layout.stations[toId];
-            if (!from || !to) return null;
-            const dx = to.position.x - from.position.x;
-            const dy = to.position.y - from.position.y;
-            const len = Math.sqrt(dx * dx + dy * dy);
-            if (len === 0) return null;
-            const offsetX = (dx / len) * 40;
-            const offsetY = (dy / len) * 18;
-            const x1 = from.position.x + offsetX;
-            const y1 = from.position.y + offsetY;
-            const x2 = to.position.x - offsetX;
-            const y2 = to.position.y - offsetY;
-            return (
-              <line
-                key={`route-${idx}`}
-                x1={x1} y1={y1} x2={x2} y2={y2}
-                stroke="#60a5fa"
-                strokeWidth={3}
-                opacity={0.5}
-                strokeLinecap="round"
-              />
-            );
-          });
-        })()}
+        {/* Part current station highlight */}
 
         {/* Station highlight rings (for part route) */}
         {highlightedStationIds.size > 0 && [...highlightedStationIds].map(sid => {

@@ -143,8 +143,7 @@ export function processMessage(
         const metric = path[1];
         const value = data.value as number;
         const unit = (data.unit as string) ?? '';
-        const timestamp = (data.timestamp as string) ?? new Date().toISOString();
-        state.handleMetric(station, metric, value, timestamp);
+        state.handleMetric(station, metric, value);
         return {
           type: 'metric_update',
           data: { stationId: station, metric, value, unit },

@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { useStore } from '../store/useStore.ts';
 import { shortPartId, formatDuration } from '../utils/format.ts';
+import { usePerfStats } from '../hooks/usePerfStats.ts';
 
-export function Header() {
+export function Header({ onToggleTopics, showTopics }: { onToggleTopics: () => void; showTopics: boolean }) {
   const connected = useStore(s => s.connected);
   const parts = useStore(s => s.parts);
   const selectPart = useStore(s => s.selectPart);
@@ -12,6 +13,7 @@ export function Header() {
   const [showResults, setShowResults] = useState(false);
 
   const stats = getStats();
+  const perf = usePerfStats();
 
   const results = useCallback(() => {
     if (!query.trim()) return [];
@@ -41,9 +43,40 @@ export function Header() {
         <StatChip label="Thrpt" value={stats.throughputPerMin > 0 ? `${stats.throughputPerMin.toFixed(1)}/m` : '-'} color="text-cyan-400" />
       </div>
 
-      {/* Search + connection */}
+      {/* Perf stats — visible when topics > 50 */}
+      {perf.uniqueTopics > 50 && (
+        <div className="flex items-center gap-3 text-[10px] bg-purple-900/40 border border-purple-700/40 rounded px-2.5 py-1 shrink-0">
+          <span className="text-purple-400 font-bold">STRESS</span>
+          <span className="text-gray-300">
+            <span className="text-white font-bold">{perf.uniqueTopics.toLocaleString()}</span> topics
+          </span>
+          <span className="text-gray-500">|</span>
+          <span className="text-gray-300">
+            <span className="text-white font-bold">{perf.metricsPerSecond.toLocaleString()}</span> msg/s
+          </span>
+          <span className="text-gray-500">|</span>
+          <span className={`font-bold ${perf.lastUpdateMs < 16 ? 'text-green-400' : perf.lastUpdateMs < 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+            {perf.lastUpdateMs.toFixed(1)}ms
+          </span>
+          <span className="text-gray-500">|</span>
+          <span className="text-gray-300">
+            total: <span className="text-white font-bold">{(perf.totalMetricsReceived / 1000).toFixed(1)}k</span>
+          </span>
+        </div>
+      )}
+
+      {/* Topics toggle + Search + connection */}
       <div className="flex items-center gap-3 shrink-0">
-        {/* Search */}
+        <button
+          onClick={onToggleTopics}
+          className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+            showTopics
+              ? 'bg-cyan-900/60 border-cyan-600 text-cyan-300'
+              : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-gray-500'
+          }`}
+        >
+          Topics
+        </button>
         <div className="relative">
           <input
             type="text"

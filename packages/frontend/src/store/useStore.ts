@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Part, PartSensorEvent, StationState, FactoryLayout, LiveEvent, ExitResult, StationStatus, TransitPart, SensorState, SensorDecision, MetricSample } from '../types.ts';
+import type { Part, StationState, FactoryLayout, LiveEvent, ExitResult, StationStatus, TransitPart, SensorState, SensorDecision } from '../types.ts';
 
 let eventCounter = 0;
 let initTimestamp: number | null = null;
@@ -16,33 +16,26 @@ export interface StatsData {
 }
 
 interface AppStore {
-  // Connection
   connected: boolean;
   setConnected: (v: boolean) => void;
 
-  // Factory layout
   layout: FactoryLayout | null;
   setLayout: (layout: FactoryLayout) => void;
 
-  // Parts
   parts: Map<string, Part>;
   selectedPartId: string | null;
   selectPart: (partId: string | null) => void;
 
-  // Stations
   stations: Map<string, StationState>;
   selectedStationId: string | null;
   selectStation: (stationId: string | null) => void;
 
-  // Transit parts
   transitParts: Map<string, TransitPart>;
 
-  // Sensors
   sensors: Map<string, SensorState>;
   selectedSensorId: string | null;
   selectSensor: (sensorId: string | null) => void;
 
-  // Live events
   events: LiveEvent[];
 
   // Actions from WebSocket messages
@@ -51,17 +44,15 @@ interface AppStore {
   handlePartExit: (data: { partId: string; stationId: string; area: string; line: string; timestamp: string; result: ExitResult; cycleTimeMs: number }) => void;
   handlePartProcess: (data: { partId: string; stationId: string; progressPct: number }) => void;
   handleStationStatus: (data: { stationId: string; status: StationStatus; currentPartId: string | null }) => void;
-  handleMetricUpdate: (data: { stationId: string; metric: string; value: number }) => void;
+  handleMetricFlush: (data: Array<{ stationId: string; metric: string; value: number; unit: string }>) => void;
   handleTransitStart: (data: { partId: string; fromStationId: string; toStationId: string; transitTimeMs: number; timestamp: string }) => void;
   handleTransitStop: (data: { partId: string; fromStationId: string; toStationId: string; reason: string; timestamp: string }) => void;
   handleSensorTrigger: (data: { sensorId: string; partId: string; type: string; decision: SensorDecision; timestamp: string; fromStationId: string; toStationId: string }) => void;
-  handlePartOverride: (data: { partId: string; timestamp: string }) => void;
 
   // Computed
   getActiveParts: () => Part[];
   getCompletedParts: () => Part[];
   getErrorCount: () => number;
-  getStationHistory: (stationId: string) => Part[];
   getStats: () => StatsData;
 }
 
@@ -95,7 +86,7 @@ export const useStore = create<AppStore>((set, get) => ({
     initTimestamp = Date.now();
     const parts = new Map<string, Part>();
     for (const p of data.parts) {
-      parts.set(p.partId, { ...p, sensorEvents: p.sensorEvents ?? [] });
+      parts.set(p.partId, { ...p, progressPct: p.progressPct ?? 0 });
     }
     const stations = new Map<string, StationState>();
     for (const [id, s] of Object.entries(data.stations)) {
@@ -122,30 +113,12 @@ export const useStore = create<AppStore>((set, get) => ({
           currentStation: data.stationId,
           currentArea: data.area,
           currentLine: data.line,
-          history: [],
-          sensorEvents: [],
+          progressPct: 0,
         };
       } else if (part.status === 'completed' || part.status === 'scrapped') {
-        // Completed/scrapped parts must NEVER re-enter production
         return {};
       } else {
-        part = { ...part, status: 'in_station', currentStation: data.stationId, currentArea: data.area, currentLine: data.line };
-      }
-      // Idempotency: skip if this exact enter already exists (prevents duplicates on reconnect)
-      const alreadyExists = part.history.some(
-        h => h.stationId === data.stationId && h.enteredAt === data.timestamp,
-      );
-      if (!alreadyExists) {
-        part.history = [...part.history, {
-          stationId: data.stationId,
-          area: data.area,
-          line: data.line,
-          enteredAt: data.timestamp,
-          exitedAt: null,
-          result: null,
-          cycleTimeMs: null,
-          progressPct: 0,
-        }];
+        part = { ...part, status: 'in_station', currentStation: data.stationId, currentArea: data.area, currentLine: data.line, progressPct: 0 };
       }
       parts.set(data.partId, part);
 
@@ -155,7 +128,6 @@ export const useStore = create<AppStore>((set, get) => ({
         stations.set(data.stationId, { ...station, status: 'running', currentPartId: data.partId });
       }
 
-      // Remove transit part (it arrived at its destination)
       const transitParts = new Map(state.transitParts);
       transitParts.delete(data.partId);
 
@@ -178,31 +150,21 @@ export const useStore = create<AppStore>((set, get) => ({
       const parts = new Map(state.parts);
       const part = parts.get(data.partId);
       if (part && (part.status === 'completed' || part.status === 'scrapped')) {
-        return {}; // Completed/scrapped parts cannot exit again
+        return {};
       }
       if (part) {
-        const history = [...part.history];
-        // Find matching entry by stationId (may not be last if next enter arrived first)
-        for (let i = history.length - 1; i >= 0; i--) {
-          if (history[i].stationId === data.stationId && !history[i].exitedAt) {
-            history[i] = { ...history[i], exitedAt: data.timestamp, result: data.result, cycleTimeMs: data.cycleTimeMs, progressPct: 100 };
-            break;
-          }
-        }
-
         const stationConfig = state.layout?.stations[data.stationId];
         let status = part.status;
         if (data.result === 'nok') status = 'scrapped';
         else if (stationConfig && stationConfig.nextStations.length === 0 && data.result === 'ok') status = 'completed';
         else status = 'in_transit';
 
-        parts.set(data.partId, { ...part, history, status, currentStation: null });
+        parts.set(data.partId, { ...part, status, currentStation: null, progressPct: 100 });
       }
 
       const stations = new Map(state.stations);
       const station = stations.get(data.stationId);
       if (station) {
-        // Increment counters
         const counters = { ...(station.counters ?? { ok: 0, nok: 0, rework: 0 }) };
         if (data.result === 'ok') counters.ok++;
         else if (data.result === 'nok') counters.nok++;
@@ -231,14 +193,7 @@ export const useStore = create<AppStore>((set, get) => ({
       const parts = new Map(state.parts);
       const part = parts.get(data.partId);
       if (part) {
-        const history = [...part.history];
-        for (let i = history.length - 1; i >= 0; i--) {
-          if (history[i].stationId === data.stationId && !history[i].exitedAt) {
-            history[i] = { ...history[i], progressPct: data.progressPct };
-            break;
-          }
-        }
-        parts.set(data.partId, { ...part, history });
+        parts.set(data.partId, { ...part, progressPct: data.progressPct });
       }
       return { parts };
     });
@@ -268,25 +223,23 @@ export const useStore = create<AppStore>((set, get) => ({
     });
   },
 
-  handleMetricUpdate: (data) => {
+  // FE-side batch flush — single set() for all buffered metrics
+  handleMetricFlush: (data) => {
     set((state) => {
       const stations = new Map(state.stations);
-      const station = stations.get(data.stationId);
-      if (station) {
+
+      for (const item of data) {
+        const station = stations.get(item.stationId);
+        if (!station) continue; // Skip virtual stations not in layout
+
         const metrics = { ...station.metrics };
-        if (data.metric === 'temperature') metrics.temperature = data.value;
-        else if (data.metric === 'cycle_time') metrics.cycleTime = data.value;
-        else if (data.metric === 'output_count') metrics.outputCount = data.value;
+        if (item.metric === 'temperature') metrics.temperature = item.value;
+        else if (item.metric === 'cycle_time') metrics.cycleTime = item.value;
+        else if (item.metric === 'output_count') metrics.outputCount = item.value;
 
-        // Update metric history ring buffer
-        const metricHistory = { ...(station.metricHistory ?? {}) };
-        const existing = metricHistory[data.metric] ?? [];
-        const sample: MetricSample = { value: data.value, timestamp: new Date().toISOString() };
-        const updated = [...existing, sample];
-        metricHistory[data.metric] = updated.length > 60 ? updated.slice(-60) : updated;
-
-        stations.set(data.stationId, { ...station, metrics, metricHistory });
+        stations.set(item.stationId, { ...station, metrics });
       }
+
       return { stations };
     });
   },
@@ -328,34 +281,13 @@ export const useStore = create<AppStore>((set, get) => ({
         isActive: true,
       });
 
-      // Record sensor event on the part (with idempotency)
+      // Update part status on sensor fail
       const parts = new Map(state.parts);
       const part = parts.get(data.partId);
-      if (part) {
-        const existing = part.sensorEvents ?? [];
-        const alreadyExists = existing.some(
-          se => se.sensorId === data.sensorId && se.timestamp === data.timestamp,
-        );
-
-        if (!alreadyExists) {
-          const sensorEvent: PartSensorEvent = {
-            sensorId: data.sensorId,
-            type: data.type as PartSensorEvent['type'],
-            decision: data.decision,
-            timestamp: data.timestamp,
-            fromStationId: data.fromStationId,
-            toStationId: data.toStationId,
-          };
-          const sensorEvents = [...existing, sensorEvent];
-
-          let status = part.status;
-          if (data.decision === 'fail') status = 'scrapped';
-
-          parts.set(data.partId, { ...part, sensorEvents, status });
-        }
+      if (part && data.decision === 'fail') {
+        parts.set(data.partId, { ...part, status: 'scrapped' });
       }
 
-      // Find sensor displayId from layout
       const sensorConfig = state.layout?.sensors.find(s => s.sensorId === data.sensorId);
       const sensorLabel = sensorConfig?.displayId ?? data.sensorId;
 
@@ -383,49 +315,14 @@ export const useStore = create<AppStore>((set, get) => ({
           partId: data.partId,
         });
       }
-      // 'pass' - don't add event (too noisy)
 
       return { parts, sensors, events };
-    });
-  },
-
-  handlePartOverride: (data) => {
-    set((state) => {
-      const parts = new Map(state.parts);
-      const part = parts.get(data.partId);
-      if (part) {
-        parts.set(data.partId, { ...part, status: 'in_transit' });
-      }
-      // Remove stopped transit
-      const transitParts = new Map(state.transitParts);
-      transitParts.delete(data.partId);
-
-      const events = addEvent(state.events, {
-        type: 'part_enter',
-        message: `${data.partId} manually overridden → OK`,
-        timestamp: data.timestamp,
-        partId: data.partId,
-      });
-
-      return { parts, transitParts, events };
     });
   },
 
   getActiveParts: () => [...get().parts.values()].filter(p => p.status === 'in_station' || p.status === 'in_transit'),
   getCompletedParts: () => [...get().parts.values()].filter(p => p.status === 'completed'),
   getErrorCount: () => [...get().parts.values()].filter(p => p.status === 'scrapped').length,
-
-  getStationHistory: (stationId: string) => {
-    const allParts = [...get().parts.values()];
-    return allParts
-      .filter(p => p.history.some(h => h.stationId === stationId))
-      .sort((a, b) => {
-        const aEntry = [...a.history].reverse().find(h => h.stationId === stationId);
-        const bEntry = [...b.history].reverse().find(h => h.stationId === stationId);
-        return (bEntry?.enteredAt ?? '').localeCompare(aEntry?.enteredAt ?? '');
-      })
-      .slice(0, 50);
-  },
 
   getStats: () => {
     const allParts = [...get().parts.values()];
@@ -437,20 +334,26 @@ export const useStore = create<AppStore>((set, get) => ({
     const runningStations = [...stations.values()].filter(s => s.status === 'running').length;
     const totalStations = stations.size;
 
-    // Average cycle time from all completed history entries
+    // Avg cycle time from station counters — use last cycle time from each station
     const cycleTimes: number[] = [];
-    for (const p of allParts) {
-      for (const h of p.history) {
-        if (h.cycleTimeMs != null) cycleTimes.push(h.cycleTimeMs);
-      }
+    for (const s of stations.values()) {
+      if (s.metrics.cycleTime != null) cycleTimes.push(s.metrics.cycleTime);
     }
     const avgCycleTimeMs = cycleTimes.length > 0
       ? cycleTimes.reduce((a, b) => a + b, 0) / cycleTimes.length
       : 0;
 
-    // Rework rate: parts with at least 1 rework result / total parts
-    const partsWithRework = allParts.filter(p => p.history.some(h => h.result === 'rework')).length;
-    const reworkRate = allParts.length > 0 ? (partsWithRework / allParts.length) * 100 : 0;
+    // Rework rate from station counters
+    let totalOk = 0, totalNok = 0, totalRework = 0;
+    for (const s of stations.values()) {
+      if (s.counters) {
+        totalOk += s.counters.ok;
+        totalNok += s.counters.nok;
+        totalRework += s.counters.rework;
+      }
+    }
+    const totalExits = totalOk + totalNok + totalRework;
+    const reworkRate = totalExits > 0 ? (totalRework / totalExits) * 100 : 0;
 
     // Throughput: completed parts per minute since init
     const elapsedMinutes = initTimestamp ? (Date.now() - initTimestamp) / 60000 : 0;

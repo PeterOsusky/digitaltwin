@@ -1,24 +1,63 @@
 # Digital Twin POC - Task Tracking
 
-## Completed
-- [x] Phase 1: Project scaffolding (npm workspaces, shared types, factory config)
-- [x] Phase 2: MQTT broker + backend (Aedes, WebSocket server, state manager)
-- [x] Phase 3: Factory simulator (3 production lines, part movement)
-- [x] Phase 4: React frontend skeleton (Vite, Zustand, WebSocket hook)
-- [x] Phase 5: SVG Factory floor map (stations, connections, animations)
-- [x] Phase 6: Part detail panel + timeline history
-- [x] Phase 7: Live event feed + Stats panel
-- [x] V2 - Fix UI layout (flex instead of grid, all panels visible)
-- [x] V2 - Animated conveyor belts (CSS dash animation, thick belt paths)
-- [x] V2 - Sensor data model (types, MQTT topics, factory config)
-- [x] V2 - Sensor simulation logic (sequential evaluation during transit)
-- [x] V2 - Frontend transit animation (TransitPartChip with requestAnimationFrame)
-- [x] V2 - Frontend sensor visualization (SensorNode with diamond shapes, flash effects)
-- [x] V2 - Broker handling for transit/sensor topics
-- [x] V2 - End-to-end verification (all 3 processes running, no errors)
+## V5: Read-Only Real-Time + Topic Data Viewer
 
-## Architecture
-- Broker: Aedes MQTT on port 1883, WebSocket on port 3001
-- Simulator: Node.js publishing MQTT events
-- Frontend: React 18 + Vite + Tailwind + Zustand on port 5173
-- Sensor types: Data Check (stop line), Routing (rework), Process Decision (skip)
+### Princip
+- Aedes broker spracuva kazdu MQTT spravu okamzite, state-manager update okamzity
+- **WS vrstva v server.ts posiela metric_update okamzite** — ziadny batch na serveri
+- **FE WebSocket vrstva** zbiera metric_update do internej Map (mimo Zustand)
+- FE refreshuje UI cez requestAnimationFrame / setInterval batch → 1x set() do Zustand
+- Ziadna historia, iba posledny stav
+- Zrusit override
+
+### Faza 1: Broker — zrusit WS batching + override
+- [ ] server.ts: zrusit metricBatchBuffer, startMetricBatching(), batch timer, batch logiku
+- [ ] server.ts: metric_update sa broadcastne okamzite (rovnako ako kazda ina WsMessage)
+- [ ] server.ts: zrusit simulatePartResume() (150 riadkov) + override_part case
+- [ ] state-manager: zrusit metricHistory ring buffer + METRIC_HISTORY_SIZE
+- [ ] state-manager: zrusit handlePartOverride()
+- [ ] state-manager: zrusit Part.history tracking (push v enter, update v exit/process)
+- [ ] state-manager: pridat Part.progressPct, zjednodusit getInitData
+
+### Faza 2: Shared + FE types
+- [ ] shared/types.ts: zrusit PartHistoryEntry, Part.history, Part.sensorEvents
+- [ ] shared/types.ts: zrusit MetricSample, StationState.metricHistory
+- [ ] shared/types.ts: zrusit metric_batch z WsMessage, part_override z WsMessage
+- [ ] shared/types.ts: zrusit override_part z WsRequest
+- [ ] shared/types.ts: pridat Part.progressPct
+- [ ] frontend/types.ts: mirror vsetky zmeny
+
+### Faza 3: FE — metricBuffer (FE-side batching)
+- [ ] Novy `metricBuffer.ts` mimo Zustand — Map<topicKey, {stationId, metric, value, unit, timestamp}>
+- [ ] pushMetric() funkcia — volana z useWebSocket pri kazdej metric_update sprave
+- [ ] flushMetrics() — vrati a vycisti buffer, volane z batch loopu
+- [ ] startMetricBatchLoop() — setInterval 500ms → flush → store.handleMetricFlush()
+- [ ] Aj ukladat VSETKY topicy pre Topic Data Viewer (nikdy neprecistene)
+
+### Faza 4: FE store cleanup
+- [ ] Novy handleMetricFlush(items) — 1x set() pre cely batch
+- [ ] Zrusit handleMetricBatch (stary broker-batch handler)
+- [ ] Zrusit history tracking z handlePartEnter/Exit/Process
+- [ ] Zrusit handlePartOverride, getStationHistory
+- [ ] Zrusit metricHistory ring buffer z handleMetricUpdate
+- [ ] Zjednodusit getStats — counters namiesto history iteracie
+
+### Faza 5: FE UI cleanup
+- [ ] DetailSlidePanel: zrusit override, PartTimeline, sparklines, recent parts
+- [ ] useWebSocket: metric_update → pushMetric(); zrusit metric_batch/part_override case
+
+### Faza 6: Topic Data Viewer
+- [ ] TopicDataViewer komponent — virtualizovany scrollable list 1900+ topicov
+  - Topic key (stationId/metric) | Value | Unit | Age
+  - Search/filter input
+  - Pocet unikatnych topicov
+- [ ] Integovat do UI (toggle panel alebo tab vedla factory mapy)
+
+### Faza 7: Cleanup
+- [ ] Zmazat PartTimeline.tsx, MetricSparkline.tsx, StationHealthIndicator.tsx
+- [ ] Cleanup nepotrrebnych importov
+
+---
+
+## Completed
+- [x] V1-V4.1

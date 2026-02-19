@@ -4,8 +4,10 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "dev": "concurrently -n broker,sim,ui -c blue,yellow,green \"npm run dev:broker\" \"npm run dev:simulator\" \"npm run dev:frontend\"",
+    "dev:stress": "concurrently -n broker,sim,ui -c blue,yellow,green \"npm run dev:broker\" \"npm run dev:simulator:stress\" \"npm run dev:frontend\"",
     "dev:broker": "npm -w packages/broker run dev",
     "dev:simulator": "npm -w packages/simulator run dev",
+    "dev:simulator:stress": "npm -w packages/simulator run dev:stress",
     "dev:frontend": "npm -w packages/frontend run dev",
     "build:shared": "npm -w packages/shared run build"
   },

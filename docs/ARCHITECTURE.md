@@ -14,6 +14,8 @@
 11. [Datovy model](#11-datovy-model)
 12. [Factory layout a ID schema](#12-factory-layout-a-id-schema)
 13. [Senzorovy system](#13-senzorovy-system)
+14. [Metrikovy system (V4)](#14-metrikovy-system-v4)
+15. [Stress test — 2000 topicov (V4.1)](#15-stress-test--2000-topicov-v41)
 
 ---
 
@@ -25,7 +27,7 @@ Digital Twin POC simuluje fabriku s 3 vyrobnymi linkami (Assembly, Welding, Pain
 - **Runtime:** Node.js + TypeScript
 - **MQTT broker:** Aedes (JS, ziadna externy instalacia)
 - **Simulator:** Node.js + mqtt.js klient
-- **Frontend:** React 18 + Vite + Tailwind CSS + Zustand
+- **Frontend:** React 18 + Vite + Tailwind CSS + Zustand + Recharts
 - **Monorepo:** npm workspaces
 
 ---
@@ -65,11 +67,11 @@ Digital Twin POC simuluje fabriku s 3 vyrobnymi linkami (Assembly, Welding, Pain
 
 Tok dat:
 1. **Simulator** generuje kusy, simuluje spracovanie na staniciach, vyhodnocuje senzory
-2. **Simulator** publikuje MQTT spravy do brokera
+2. **Simulator** publikuje MQTT spravy do brokera (vr. per-station-type metrik)
 3. **Broker** (interny MQTT klient) subscribne `factory/#`, spracuje spravy cez `mqtt-handler.ts`
-4. **State Manager** aktualizuje in-memory stav (kusy, stanice, senzory)
-5. **Broker** broadcastne WebSocket spravy vsetkym pripojenym frontendovym klientom
-6. **Frontend** prijma WS spravy, aktualizuje Zustand store, rerenderi SVG mapu
+4. **State Manager** aktualizuje in-memory stav (kusy, stanice, senzory, metrikova historia, countery)
+5. **Broker** broadcastne WS spravy — metriky su **batchovane** (500ms buffer → 1 `metric_batch` sprava)
+6. **Frontend** prijma WS spravy, aktualizuje Zustand store (batch handler — 1× `set()` na cely batch), rerenderi SVG mapu
 
 ---
 
@@ -84,6 +86,9 @@ npm run build:shared
 
 # Spustenie vsetkych 3 servicov naraz
 npm run dev
+
+# Spustenie so stress testom (2000 MQTT topicov)
+npm run dev:stress
 ```
 
 Servisy:
@@ -92,9 +97,12 @@ Servisy:
 | MQTT Broker | 1883 | `npm run dev:broker` |
 | WebSocket | 3001 | (sucast brokera) |
 | Simulator | - | `npm run dev:simulator` |
+| Simulator (stress) | - | `npm run dev:simulator:stress` |
 | Frontend (Vite) | 5173 | `npm run dev:frontend` |
 
 Frontend je dostupny na **http://localhost:5173**
+
+> **Stress test mode:** `npm run dev:stress` spusti simulator s env `STRESS_TEST=1` — generuje 1875 virtualnych metric topicov navyse k 35 realnym. V headeri sa zobrazi fialovy STRESS badge s realnymi perf statistikami.
 
 ---
 
@@ -140,13 +148,17 @@ digital_twin/
 │           ├── types.ts         # frontend mirror typov
 │           ├── utils/
 │           │   └── format.ts    # formatTime, formatDuration, shortPartId
+│           ├── config/
+│           │   └── station-metrics.ts  # STATION_METRIC_CONFIGS (per-type metriky)
 │           ├── store/
-│           │   └── useStore.ts  # Zustand store (cely stav aplikacie)
+│           │   ├── useStore.ts  # Zustand store (cely stav aplikacie)
+│           │   └── perfStats.ts # perf tracking mimo Zustand (bez re-renderov)
 │           ├── hooks/
-│           │   └── useWebSocket.ts  # WS pripojenie + auto-reconnect
+│           │   ├── useWebSocket.ts  # WS pripojenie + auto-reconnect
+│           │   └── usePerfStats.ts  # polling hook pre stress test statistiky
 │           └── components/
-│               ├── Header.tsx          # navbar + compact stats + search
-│               ├── DetailSlidePanel.tsx # slide-in overlay (part/station detail)
+│               ├── Header.tsx          # navbar + compact stats + search + STRESS badge
+│               ├── DetailSlidePanel.tsx # slide-in overlay (part/station detail + charts)
 │               ├── EventDrawer.tsx     # collapsible event feed zdola
 │               ├── factory-map/
 │               │   ├── FactoryFloorMap.tsx  # SVG mapa (viewBox 900x570)
@@ -154,6 +166,10 @@ digital_twin/
 │               │   ├── ConveyorBelt.tsx     # animovany pas
 │               │   ├── SensorNode.tsx       # diamant na pase
 │               │   └── TransitPartChip.tsx  # animovany kus po pase
+│               ├── charts/
+│               │   ├── MetricSparkline.tsx        # Recharts AreaChart sparkline (120x40)
+│               │   ├── OkNokPieChart.tsx           # Recharts donut pie (OK/NOK/Rework)
+│               │   └── StationHealthIndicator.tsx  # per-metric riadok (sparkline + hodnota + status)
 │               └── part-detail/
 │                   ├── PartDetailPanel.tsx  # (nepouziva sa, nahradeny DetailSlidePanel)
 │                   └── PartTimeline.tsx     # vertikalny timeline historiae kusu
@@ -172,11 +188,14 @@ digital_twin/
 | `Part` | Sledovany kus - ID, status, historia stanic |
 | `PartHistoryEntry` | Zaznam navstevy stanice (enter/exit cas, vysledok, cycle time) |
 | `StationConfig` | Konfiguracia stanice - ID, displayId, pozicia, typ, next stations |
-| `StationState` | Runtime stav stanice - status, aktualny kus, metriky |
+| `StationState` | Runtime stav stanice - status, aktualny kus, metriky, metricHistory, counters |
 | `SensorConfig` | Konfiguracia senzora - typ, pozicia na pase, pravdepodobnost |
 | `SensorState` | Runtime stav senzora - posledne rozhodnutie |
 | `FactoryLayout` | Kompletny layout fabriky (areas, stations, sensors) |
-| `WsMessage` | Discriminated union vsetkych WS sprav (10 typov) |
+| `WsMessage` | Discriminated union vsetkych WS sprav (11 typov vr. metric_batch) |
+| `MetricSample` | Hodnota + timestamp pre historiu metriky |
+| `StationMetricConfig` | Konfig jednej metriky (label, unit, nominalMin/Max, warningMin/Max, baseValue, variance) |
+| `StationCounters` | OK/NOK/Rework pocitadla pre stanicu |
 
 ### Typy stavov:
 
@@ -188,12 +207,13 @@ SensorType:    data_check | routing | process_decision
 SensorDecision: pass | fail | rework | skip_process
 ```
 
-**`packages/shared/src/factory-config.ts`** - definicia layoutu fabriky.
+**`packages/shared/src/factory-config.ts`** - definicia layoutu fabriky a metrik.
 
 Exporty:
 - `FACTORY_LAYOUT` - kompletny layout so stanicami a senzormi
 - `SENSOR_CONFIG` - pole senzor konfigov
 - `getLineRoutes()` - usporiadane zoznamy stanic pre kazdu linku
+- `STATION_METRIC_CONFIGS` - per-station-type definicie metrik (metricId, label, unit, prahy, baseValue)
 
 ---
 
@@ -205,8 +225,10 @@ Exporty:
 2. **Interny MQTT klient** - subscribe na `factory/#`, deleguje spracovanie
 3. **WebSocket server** - port 3001, posiela spravy do frontendu
 4. **Bridge logika** - MQTT sprava → `processMessage()` → state update → WS broadcast
+5. **Metric batching** - metriky sa neposilaju okamzite, ale batchuju sa po 500ms do jednej `metric_batch` WS spravy
+6. **Override resume** - simuluje pokracovanie kusu cez zostávajuce stanice po manualnom override
 
-Pri pripojeni noveho WS klienta posle kompletny `init` stav.
+Pri pripojeni noveho WS klienta posle kompletny `init` stav (vr. metricHistory a counters per station).
 
 ### `mqtt-handler.ts` - Parsovanie topikov
 
@@ -231,8 +253,12 @@ Trieda `StateManager`:
 - `stations: Map<string, StationState>` - stavy stanic
 - `sensors: Map<string, SensorState>` - stavy senzorov
 - `layout: FactoryLayout` - referencny layout
+- `metricHistory: Map<string, Map<string, MetricSample[]>>` - ring buffer (60 vzoriek) per station per metric
+- `stationCounters: Map<string, StationCounters>` - OK/NOK/Rework pocitadla per station
 
-Metody zodpovedaju MQTT udalostiam. `getInitData()` vracia kompletny stav pre noveho WS klienta.
+Metody zodpovedaju MQTT udalostiam. `getInitData()` vracia kompletny stav pre noveho WS klienta vrátane metricHistory a counters.
+
+**Metric ring buffer:** Kazda stanica uklada poslednych 60 vzoriek pre kazdu metriku. Pri novom `handleMetric()` sa vzorka prida a ak pocet presiahne 60, najstarsie sa odstránia.
 
 ---
 
@@ -242,8 +268,14 @@ Metody zodpovedaju MQTT udalostiam. `getInitData()` vracia kompletny stav pre no
 
 - Udrzuje 5-10 aktivnych kusov
 - Vytvara nove kusy kazdych 3-15 sekund na nahodnej linke
-- Generuje teplotne metriky kazdych 5 sekund
+- Generuje station-type-specific metriky kazdych 5 sekund (cez `STATION_METRIC_CONFIGS`)
 - Part ID format: `PART-{rok}-{poradove_cislo}` (napr. `PART-2026-00042`)
+- **Stress test mode** (`STRESS_TEST=1`): generuje navyse 1875 virtualnych metric topicov (125 virtualnych stanic × 15 metrik)
+
+**Metrikovy simulator:**
+- Kazda realna stanica publikuje metriky podla svojho typu (napr. machine → vibration, power, temperature)
+- Hodnoty sa generuju cez random walk s mean-reversion okolo `baseValue ± variance`
+- Metriky sa publikuju na topic `factory/{area}/{line}/{stationId}/metrics/{metricId}`
 
 ### `simulated-part.ts` - Simulacia jedneho kusu
 
@@ -290,7 +322,7 @@ enterStation() → processing (progress 0-100%) → exitStation()
 │                                    │  Detail   ││
 │          Factory Floor Map         │  Slide    ││
 │          (SVG, fullscreen)         │  Panel    ││
-│                                    │  (380px)  ││
+│                                    │  (420px)  ││
 │                                    │  overlay  ││
 │                                    └───────────┘│
 │ ┌─────────────────────────────────────────────┐ │
@@ -317,13 +349,25 @@ Centralny stav aplikacie:
 
 **Computed metody:**
 - `getStationHistory(stationId)` - kusy ktore presli stanicou (max 50)
-- `getStats()` - agregovanem statistiky (active, completed, scrap, avg cycle, rework%, throughput)
+- `getStats()` - agregovane statistiky (active, completed, scrap, avg cycle, rework%, throughput)
 
-### WebSocket Hook (`useWebSocket.ts`)
+**Batch handler (`handleMetricBatch`):**
+- Prijma pole metrik z jedneho WS batchu
+- Spracuje vsetky metriky v **jednom** `set()` volani (kriticke pre performance pri 2000 topicoch)
+- Virtualné stanice (stress test) sa automaticky preskakuju ak nie su v layoute
 
+### Hooks
+
+**`useWebSocket.ts`**
 - Pripaja sa na `ws://localhost:3001`
 - Auto-reconnect kazdych 3 sekund
-- Routuje 10 typov WsMessage na prislusne store handlery
+- Routuje 11 typov WsMessage na prislusne store handlery (vr. `metric_batch`)
+- Pri `metric_batch` meria cas store updatu a reportuje do `perfStats`
+
+**`usePerfStats.ts`**
+- Polling hook (1s interval), cita z externeho `perfStats` objektu
+- Nepouziva Zustand — ziadne zbytocne re-rendery
+- Pouziva sa v Header pre STRESS badge
 
 ### Komponenty
 
@@ -331,6 +375,7 @@ Centralny stav aplikacie:
 Obsahuje:
 - Nazov projektu
 - **Compact stats bar**: Active | Done | Scrap | Busy stanice | Avg cycle time | Rework % | Throughput/min
+- **STRESS badge** (fialovy, zobrazeny len pri stress teste): pocet topicov | pocet stanic | msg/s | update cas (ms, farebne kodovany) | celkovy pocet prijatych metrik
 - Search bar (filtruje kusy podla ID, max 8 vysledkov)
 - Connection indicator (Live/Off)
 
@@ -377,12 +422,14 @@ Kliknutie na prazdne miesto deselectne vsetko.
 - Cerveny indikator ak je transit zastaveny (sensor fail)
 
 #### `DetailSlidePanel.tsx`
-Slide-in overlay panel z pravej strany (380px), `transition: transform 0.3s`:
+Slide-in overlay panel z pravej strany (420px), `transition: transform 0.3s`:
 
 **Station detail:**
 - DisplayId + nazov, status, typ, area
 - Aktualny kus (kliknutelny odkaz na part detail)
 - Metriky: Output count, Cycle time, Teplota
+- **Result Distribution** — OK/NOK/Rework donut pie chart (`OkNokPieChart`)
+- **Live Metrics** — per-metric sparklines s prahmi a status indikatormi (`StationHealthIndicator`)
 - Zoznam poslednych kusov (scrollable, kliknutelne)
 
 **Part detail:**
@@ -454,16 +501,20 @@ factory/{area}/{line}/sensor/{sensorId}/trigger
 
 | Typ | Data | Kedy |
 |-----|------|------|
-| `init` | parts[], layout, stations, sensors | Pripojenie klienta |
+| `init` | parts[], layout, stations, sensors, metricHistory, counters | Pripojenie klienta |
 | `part_enter` | partId, stationId, area, line, timestamp | Kus vstupi na stanicu |
 | `part_exit` | partId, stationId, result, cycleTimeMs | Kus opusti stanicu |
 | `part_process` | partId, stationId, progressPct | Progress spracovania |
 | `station_status` | stationId, status, currentPartId | Zmena stavu stanice |
-| `metric_update` | stationId, metric, value, unit | Nova metrika |
+| `metric_update` | stationId, metric, value, unit | Nova metrika (batchovana) |
+| `metric_batch` | Array<{stationId, metric, value, unit}> | **Batch metrik** (kazdych 500ms) |
 | `transit_start` | partId, from, to, transitTimeMs | Kus zacal transit |
 | `transit_stop` | partId, from, to, reason | Kus zastaveny na pase |
 | `sensor_trigger` | sensorId, partId, type, decision | Senzor evaluovany |
 | `part_created` | Part | Novy kus vytvoreny |
+| `part_override` | partId, timestamp | Manuálny override kusu |
+
+> **Metric batching:** Broker neposiela `metric_update` spravy okamzite. Namiesto toho ich zbiera do buffera a kazdych 500ms posle jednu `metric_batch` spravu so vsetkymi nahromadenymi metrikami. Toto je kriticke pri stress teste (1910 metrik by inak bolo 1910 individualnych WS sprav).
 
 ### Frontend → Backend (`WsRequest`)
 
@@ -471,6 +522,7 @@ factory/{area}/{line}/sensor/{sensorId}/trigger
 |-----|------|
 | `get_part_history` | partId |
 | `search_part` | query string |
+| `override_part` | partId, fromStationId, toStationId, failedSensorId |
 
 ---
 
@@ -611,11 +663,134 @@ Kazdy usek dopravneho pasu (medzi 2 stanicami) ma 1-3 senzory:
 
 ### Simulator
 - `mqtt` - MQTT klient
+- `cross-env` - cross-platform env premenne (dev, pre Windows kompatibilitu)
 - `tsx` - TypeScript executor (dev)
 
 ### Frontend
 - `react`, `react-dom` - UI framework
 - `zustand` - state management
+- `recharts` - kniznica grafov (sparklines, pie charts)
 - `vite` - build tool + dev server
 - `tailwindcss` - utility CSS
 - `@vitejs/plugin-react` - React HMR
+
+---
+
+## 14. Metrikovy system (V4)
+
+### Station-type metriky
+
+Kazdy typ stanice ma definovanu sadu metrik v `STATION_METRIC_CONFIGS`:
+
+| Typ stanice | Metriky |
+|-------------|---------|
+| **load** | weight (kg) |
+| **machine** | vibration (mm/s), power (kW), temperature (°C) |
+| **measure** | dimension (mm), accuracy (%) |
+| **inspection** | score (pts), defects (pcs) |
+| **manual** | temperature (°C) |
+| **pack** | weight (kg) |
+| **buffer** | ziadne |
+
+Kazda metrika ma definovane:
+- `nominalMin/Max` — zelena zona (normalny prevadzkovy rozsah)
+- `warningMin/Max` — zlta zona (varovanie)
+- `baseValue` — stredna hodnota pre simulator
+- `variance` — rozsah nahodnej zmeny
+
+### Metrikova historia (Ring Buffer)
+
+- **Broker** uklada poslednych **60 vzoriek** per station per metric
+- Pri init posle kompletnu historiu novemu WS klientovi
+- **Frontend** udrzuje rovnaky ring buffer v Zustand store
+
+### Vizualizacia metrik (Recharts)
+
+**MetricSparkline** — maly AreaChart (120×40 px):
+- Zobrazuje poslednych 60 vzoriek
+- Zelene referencne ciary pre nominalMin/Max prahy
+- Gradient fill (zelena/zlta/cervena podla aktualnej hodnoty)
+- Tooltip s hodnotou a casom
+
+**OkNokPieChart** — donut (100×100 px):
+- Zelena = OK, Cervena = NOK, Oranzova = Rework
+- Centralna hodnota = celkovy pocet
+- Tooltip s percentami
+
+**StationHealthIndicator** — riadok per metrika:
+- Label | Sparkline | Aktualna hodnota | Status bodka (zelena/zlta/cervena)
+
+### OK/NOK/Rework countery
+
+Kazda stanica pocita kolko kusov preslo s vysledkom OK, NOK alebo Rework. Countery sa inkrementuju pri `part_exit` na strane brokera aj frontendu.
+
+---
+
+## 15. Stress test — 2000 topicov (V4.1)
+
+### Prehlad
+
+Stress test overuje ze architektura zvladne **2000+ MQTT topicov** a **~390 msg/s** bez degradacie UI.
+
+### Aktivacia
+
+```bash
+npm run dev:stress    # spusti vsetky 3 servisy, simulator v stress mode
+```
+
+Alebo manualne:
+```bash
+cross-env STRESS_TEST=1 tsx watch src/index.ts   # v simulator package
+```
+
+### Co generuje stress test
+
+| Zdroj | Topicov | Msg/s |
+|-------|---------|-------|
+| Realne stanice (16) | 35 metric topicov | ~7/s |
+| Virtualne stanice (125 × 15 metrik) | 1875 metric topicov | ~375/s |
+| Part lifecycle, sensors, transit | ~92 topicov | ~7-10/s |
+| **Spolu** | **~2002** | **~390/s** |
+
+Virtualne stanice (`virt-001` az `virt-125`) publikuju na `factory/stress/virtual/{virt-xxx}/metrics/{metricId}`.
+
+### Batching architektura
+
+Problem: 390 individualnych WS sprav za sekundu by zahltilo frontend (390× Zustand `set()` = React laguje).
+
+Riesenie — **dvojvrstvovy batching**:
+
+```
+Simulator → MQTT (390 msg/s) → Broker buffer (500ms) → 1× metric_batch WS → Frontend 1× set()
+```
+
+1. **Broker** zbiera `metric_update` spravy do `metricBatchBuffer[]`
+2. Kazdych **500ms** posle vsetky nahromadene metriky ako jednu `metric_batch` spravu
+3. **Frontend** `handleMetricBatch()` spracuje vsetky metriky v **jednom** `set()` volani
+4. Virtualne stanice sa v store automaticky preskakuju (nie su v layout Mape)
+
+### Performance monitoring
+
+**`perfStats.ts`** — sledovanie vykonnosti mimo Zustand (ziadne zbytocne re-rendery):
+- `lastBatchSize` — pocet metrik v poslednom batchi
+- `lastBatchStations` — pocet unikatnych stanic
+- `lastUpdateMs` — cas store updatu v ms
+- `metricsPerSecond` — msg/s (rolling 10s okno)
+- `totalMetricsReceived` — celkovy pocet prijatych metrik
+
+**STRESS badge v Header** (zobrazeny len pri stress teste, batch > 50 metrik):
+- Pocet topicov v batchi
+- Pocet stanic
+- msg/s
+- Update cas (zelena < 16ms, zlta < 50ms, cervena > 50ms)
+- Celkovy pocet prijatych metrik
+
+### Bottleneck analyza
+
+| Riziko | Riesenie | Vysledok |
+|--------|----------|----------|
+| React 390× `set()`/s | Batch handler — 1× `set()` per 500ms | < 16ms update |
+| WS 390 JSON sprav/s | Batch do 1 JSON spravy per 500ms | ~2 spravy/s |
+| Aedes 390 msg/s MQTT | Aedes zvladne 10K+ msg/s | OK |
+| Ring buffer pamat (2000 × 60 vzoriek) | Len 16 realnych stanic uklada historiu | ~12MB max |
+| Init payload (2000 stanic) | Virtualne stanice neposilaju init data | OK |

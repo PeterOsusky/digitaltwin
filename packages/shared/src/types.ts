@@ -1,10 +1,5 @@
 // ---- Metric Types ----
 
-export interface MetricSample {
-  value: number;
-  timestamp: string;
-}
-
 export interface StationMetricConfig {
   metricId: string;
   label: string;
@@ -30,17 +25,6 @@ export type StationStatus = 'online' | 'offline' | 'error' | 'idle' | 'running';
 export type ExitResult = 'ok' | 'nok' | 'rework';
 export type StationType = 'load' | 'machine' | 'inspection' | 'measure' | 'buffer' | 'manual' | 'pack';
 
-export interface PartHistoryEntry {
-  stationId: string;
-  area: string;
-  line: string;
-  enteredAt: string;
-  exitedAt: string | null;
-  result: ExitResult | null;
-  cycleTimeMs: number | null;
-  progressPct: number;
-}
-
 export interface Part {
   partId: string;
   createdAt: string;
@@ -48,7 +32,7 @@ export interface Part {
   currentStation: string | null;
   currentArea: string | null;
   currentLine: string | null;
-  history: PartHistoryEntry[];
+  progressPct: number;
 }
 
 // ---- Factory Layout ----
@@ -66,11 +50,8 @@ export interface StationConfig {
   line: string;
   type: StationType;
   position: StationPosition;
-  /** Station IDs that follow this one (usually 1, but can be multiple for parallel paths) */
   nextStations: string[];
-  /** If this is a measure station, which station to rework to on failure */
   reworkTarget?: string;
-  /** Processing time range in ms [min, max] */
   processingTime: [number, number];
 }
 
@@ -83,7 +64,6 @@ export interface StationState {
     cycleTime?: number;
     outputCount?: number;
   };
-  metricHistory?: Record<string, MetricSample[]>;
   counters?: StationCounters;
 }
 
@@ -91,7 +71,6 @@ export interface LineConfig {
   lineId: string;
   area: string;
   name: string;
-  /** Ordered station IDs - first is entry point */
   stations: string[];
 }
 
@@ -118,9 +97,7 @@ export interface SensorConfig {
   type: SensorType;
   fromStationId: string;
   toStationId: string;
-  /** Position along the belt path 0.0 to 1.0 */
   positionOnBelt: number;
-  /** Probability of negative outcome (0.0 to 1.0) */
   failProbability: number;
 }
 
@@ -211,16 +188,4 @@ export type WsMessage =
   | { type: 'part_created'; data: Part }
   | { type: 'transit_start'; data: MqttTransitStart }
   | { type: 'transit_stop'; data: MqttTransitStop }
-  | { type: 'sensor_trigger'; data: MqttSensorTrigger }
-  | { type: 'part_override'; data: { partId: string; timestamp: string } };
-
-// ---- WebSocket Messages (Frontend -> Backend) ----
-
-export type WsRequest =
-  | { type: 'get_part_history'; partId: string }
-  | { type: 'search_part'; query: string }
-  | { type: 'override_part'; partId: string; fromStationId?: string; toStationId?: string; failedSensorId?: string };
-
-export type WsResponse =
-  | { type: 'part_history'; data: Part | null }
-  | { type: 'search_results'; data: Part[] };
+  | { type: 'sensor_trigger'; data: MqttSensorTrigger };

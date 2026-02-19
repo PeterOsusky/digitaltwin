@@ -7,6 +7,14 @@ function randomBetween(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+const STRESS_TEST = process.env.STRESS_TEST === '1';
+const VIRTUAL_STATION_COUNT = 125;
+const VIRTUAL_METRICS = [
+  'temperature', 'vibration', 'power', 'pressure', 'humidity',
+  'flow_rate', 'rpm', 'torque', 'voltage', 'current',
+  'resistance', 'weight', 'dimension', 'accuracy', 'speed',
+]; // 15 metrics per virtual station = 1875 topics
+
 export class FactorySimulator {
   private activeParts = new Map<string, SimulatedPart>();
   private partCounter = 0;
@@ -40,7 +48,15 @@ export class FactorySimulator {
     this.scheduleNextPart();
 
     // Start metrics publishing
-    this.metricsTimer = setInterval(() => this.publishMetrics(), 5000);
+    this.metricsTimer = setInterval(() => {
+      this.publishMetrics();
+      if (STRESS_TEST) this.publishStressMetrics();
+    }, 5000);
+
+    if (STRESS_TEST) {
+      const totalVirtual = VIRTUAL_STATION_COUNT * VIRTUAL_METRICS.length;
+      console.log(`[simulator] STRESS TEST: ${VIRTUAL_STATION_COUNT} virtual stations × ${VIRTUAL_METRICS.length} metrics = ${totalVirtual} extra topics (total ~${totalVirtual + 35} metric topics)`);
+    }
   }
 
   stop() {
@@ -129,5 +145,47 @@ export class FactorySimulator {
         );
       }
     }
+  }
+
+  /** Stress test: publish ~1875 virtual metric topics */
+  private publishStressMetrics() {
+    const timestamp = new Date().toISOString();
+    let count = 0;
+
+    for (let i = 1; i <= VIRTUAL_STATION_COUNT; i++) {
+      const stationId = `virt-${String(i).padStart(3, '0')}`;
+
+      // Initialize state if needed
+      if (!this.metricState.has(stationId)) {
+        const stateMap = new Map<string, number>();
+        for (const metricId of VIRTUAL_METRICS) {
+          stateMap.set(metricId, 50 + Math.random() * 50); // base 50-100
+        }
+        this.metricState.set(stationId, stateMap);
+      }
+      const stateMap = this.metricState.get(stationId)!;
+
+      for (const metricId of VIRTUAL_METRICS) {
+        let current = stateMap.get(metricId) ?? 75;
+        // Random walk
+        current += (Math.random() - 0.5) * 5;
+        current = Math.max(10, Math.min(150, current));
+        current = Math.round(current * 100) / 100;
+        stateMap.set(metricId, current);
+
+        this.client.publish(
+          `factory/stress/virtual/${stationId}/metrics/${metricId}`,
+          JSON.stringify({
+            stationId,
+            value: current,
+            unit: 'unit',
+            timestamp,
+          }),
+        );
+        count++;
+      }
+    }
+
+    console.log(`[simulator] Stress: published ${count} virtual metrics`);
   }
 }
