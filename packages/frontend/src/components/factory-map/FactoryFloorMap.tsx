@@ -4,17 +4,47 @@ import { ConveyorBelt } from './ConveyorBelt.tsx';
 import { SensorNode } from './SensorNode.tsx';
 import { TransitPartChip } from './TransitPartChip.tsx';
 
+// 10 areas in 2-column × 5-row grid
 const AREA_COLORS: Record<string, string> = {
-  assembly: '#1e3a5f',
-  welding: '#3b1f2b',
-  painting: '#1f3b2b',
+  'assembly-a': '#1e3a5f',
+  'assembly-b': '#1e3a5f',
+  'welding-a': '#3b1f2b',
+  'welding-b': '#3b1f2b',
+  'machining-a': '#2b3a1f',
+  'machining-b': '#2b3a1f',
+  'painting-a': '#1f3b2b',
+  'painting-b': '#1f3b2b',
+  'packaging-a': '#2b1f3b',
+  'packaging-b': '#2b1f3b',
 };
 
-const AREA_LABELS: Record<string, { x: number; y: number }> = {
-  assembly: { x: 20, y: 60 },
-  welding: { x: 20, y: 240 },
-  painting: { x: 20, y: 430 },
-};
+// Area background positions: { y: top, height }
+const ROW_Y_STARTS = [10, 185, 360, 535, 710];
+const AREA_POSITIONS: Record<string, { x: number; y: number; w: number; h: number; labelX: number; labelY: number }> = {};
+const AREA_DEFS: Array<{ areaId: string; col: 0 | 1; row: number }> = [
+  { areaId: 'assembly-a', col: 0, row: 0 },
+  { areaId: 'assembly-b', col: 1, row: 0 },
+  { areaId: 'welding-a', col: 0, row: 1 },
+  { areaId: 'welding-b', col: 1, row: 1 },
+  { areaId: 'machining-a', col: 0, row: 2 },
+  { areaId: 'machining-b', col: 1, row: 2 },
+  { areaId: 'painting-a', col: 0, row: 3 },
+  { areaId: 'painting-b', col: 1, row: 3 },
+  { areaId: 'packaging-a', col: 0, row: 4 },
+  { areaId: 'packaging-b', col: 1, row: 4 },
+];
+for (const def of AREA_DEFS) {
+  const x = def.col === 0 ? 10 : 810;
+  const y = ROW_Y_STARTS[def.row];
+  AREA_POSITIONS[def.areaId] = {
+    x,
+    y,
+    w: 770,
+    h: 165,
+    labelX: x + 10,
+    labelY: y + 14,
+  };
+}
 
 export function FactoryFloorMap() {
   const layout = useStore(s => s.layout);
@@ -49,22 +79,22 @@ export function FactoryFloorMap() {
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 h-full">
       <svg
-        viewBox="0 0 900 570"
+        viewBox="0 0 1600 900"
         className="w-full h-full"
-        style={{ minHeight: 300 }}
+        style={{ minHeight: 400 }}
       >
         <defs>
-          <marker id="arrowNormal" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-            <polygon points="0 0, 8 3, 0 6" fill="#4b5563" />
+          <marker id="arrowNormal" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+            <polygon points="0 0, 6 2, 0 4" fill="#4b5563" />
           </marker>
-          <marker id="arrowRework" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-            <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
+          <marker id="arrowRework" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+            <polygon points="0 0, 6 2, 0 4" fill="#f59e0b" />
           </marker>
-          <marker id="arrowConveyor" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-            <polygon points="0 0, 8 3, 0 6" fill="#6b7280" />
+          <marker id="arrowConveyor" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+            <polygon points="0 0, 6 2, 0 4" fill="#6b7280" />
           </marker>
-          <marker id="arrowConveyorRework" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-            <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
+          <marker id="arrowConveyorRework" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+            <polygon points="0 0, 6 2, 0 4" fill="#f59e0b" />
           </marker>
           {/* Glow filter for highlights */}
           <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -74,29 +104,33 @@ export function FactoryFloorMap() {
         </defs>
 
         {/* Area backgrounds */}
-        {layout.areas.map(area => (
-          <g key={area.areaId}>
-            <rect
-              x={10}
-              y={AREA_LABELS[area.areaId]?.y ? AREA_LABELS[area.areaId].y - 20 : 0}
-              width={880}
-              height={160}
-              rx={10}
-              fill={AREA_COLORS[area.areaId] ?? '#1e293b'}
-              opacity={0.4}
-            />
-            <text
-              x={AREA_LABELS[area.areaId]?.x ?? 20}
-              y={AREA_LABELS[area.areaId]?.y ?? 40}
-              fontSize={14}
-              fill="#94a3b8"
-              fontWeight={700}
-              style={{ textTransform: 'uppercase' }}
-            >
-              {area.name}
-            </text>
-          </g>
-        ))}
+        {layout.areas.map(area => {
+          const pos = AREA_POSITIONS[area.areaId];
+          if (!pos) return null;
+          return (
+            <g key={area.areaId}>
+              <rect
+                x={pos.x}
+                y={pos.y}
+                width={pos.w}
+                height={pos.h}
+                rx={8}
+                fill={AREA_COLORS[area.areaId] ?? '#1e293b'}
+                opacity={0.4}
+              />
+              <text
+                x={pos.labelX}
+                y={pos.labelY}
+                fontSize={10}
+                fill="#94a3b8"
+                fontWeight={700}
+                style={{ textTransform: 'uppercase' }}
+              >
+                {area.name}
+              </text>
+            </g>
+          );
+        })}
 
         {/* Conveyor belts */}
         {connections.map(c => {
@@ -149,17 +183,17 @@ export function FactoryFloorMap() {
         })}
 
         {/* Legend */}
-        <g transform="translate(10, 545)">
-          <circle cx={8} cy={0} r={4} fill="#22c55e" />
-          <text x={16} y={3} fontSize={9} fill="#9ca3af">Running</text>
-          <circle cx={70} cy={0} r={4} fill="#6b7280" />
-          <text x={78} y={3} fontSize={9} fill="#9ca3af">Idle</text>
-          <circle cx={110} cy={0} r={4} fill="#ef4444" />
-          <text x={118} y={3} fontSize={9} fill="#9ca3af">Error</text>
-          <line x1={162} y1={0} x2={178} y2={0} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" />
-          <text x={182} y={3} fontSize={9} fill="#9ca3af">Rework</text>
-          <polygon points="230,0 235,-5 240,0 235,5" fill="#3b82f6" />
-          <text x={245} y={3} fontSize={9} fill="#9ca3af">Sensor</text>
+        <g transform="translate(10, 885)">
+          <circle cx={8} cy={0} r={3} fill="#22c55e" />
+          <text x={14} y={3} fontSize={8} fill="#9ca3af">Running</text>
+          <circle cx={58} cy={0} r={3} fill="#6b7280" />
+          <text x={64} y={3} fontSize={8} fill="#9ca3af">Idle</text>
+          <circle cx={90} cy={0} r={3} fill="#ef4444" />
+          <text x={96} y={3} fontSize={8} fill="#9ca3af">Error</text>
+          <line x1={130} y1={0} x2={142} y2={0} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" />
+          <text x={146} y={3} fontSize={8} fill="#9ca3af">Rework</text>
+          <polygon points="190,0 194,-4 198,0 194,4" fill="#3b82f6" />
+          <text x={202} y={3} fontSize={8} fill="#9ca3af">Sensor</text>
         </g>
       </svg>
     </div>

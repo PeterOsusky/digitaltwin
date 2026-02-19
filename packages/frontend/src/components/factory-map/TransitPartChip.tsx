@@ -57,14 +57,14 @@ export function TransitPartChip({ transit, beltPathId }: Props) {
 
   const label = shortPartId(transit.partId);
   const stopped = transit.stopped;
-  const r = 7;
+  const r = 5;
 
   return (
     <g>
       {/* Stopped pulsing ring */}
       {stopped && (
         <circle
-          cx={position.x} cy={position.y} r={11}
+          cx={position.x} cy={position.y} r={8}
           fill="none" stroke="#ef4444" strokeWidth={1.5} opacity={0.7}
           className="animate-pulse"
         />
@@ -81,7 +81,7 @@ export function TransitPartChip({ transit, beltPathId }: Props) {
       {/* Part ID label above */}
       <text
         x={position.x} y={position.y - r - 3}
-        fontSize={7} fill={stopped ? '#fca5a5' : '#93c5fd'}
+        fontSize={5} fill={stopped ? '#fca5a5' : '#93c5fd'}
         textAnchor="middle" fontWeight={600}
         style={{ pointerEvents: 'none' }}
       >

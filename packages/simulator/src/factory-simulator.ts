@@ -77,13 +77,13 @@ export class FactorySimulator {
   private scheduleNextPart() {
     if (!this.running) return;
 
-    // Keep 5-8 active parts
-    const delay = this.activeParts.size < 5
-      ? randomBetween(3000, 6000)
-      : randomBetween(8000, 15000);
+    // Keep 30-50 active parts across 20 production lines
+    const delay = this.activeParts.size < 30
+      ? randomBetween(1000, 3000)
+      : randomBetween(4000, 8000);
 
     this.createTimer = setTimeout(() => {
-      if (this.running && this.activeParts.size < 10) {
+      if (this.running && this.activeParts.size < 60) {
         this.createPart();
       }
       this.scheduleNextPart();

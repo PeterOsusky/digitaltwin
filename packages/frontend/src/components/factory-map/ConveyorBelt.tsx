@@ -12,9 +12,9 @@ export function ConveyorBelt({ id, from, to, isRework }: Props) {
   const dy = to.position.y - from.position.y;
   const len = Math.sqrt(dx * dx + dy * dy);
 
-  // Offset start/end to be at station edge (40px = half station width, 18px = half height)
-  const offsetX = (dx / len) * 40;
-  const offsetY = (dy / len) * 18;
+  // Offset start/end to be at station edge (22px = half station width, 10px = half height)
+  const offsetX = (dx / len) * 22;
+  const offsetY = (dy / len) * 10;
 
   const x1 = from.position.x + offsetX;
   const y1 = from.position.y + offsetY;
@@ -26,7 +26,7 @@ export function ConveyorBelt({ id, from, to, isRework }: Props) {
   if (isRework) {
     // Quadratic bezier going above
     const midX = (x1 + x2) / 2;
-    const midY = Math.min(y1, y2) - 60;
+    const midY = Math.min(y1, y2) - 35;
     const pathD = `M ${x1} ${y1} Q ${midX} ${midY} ${x2} ${y2}`;
 
     return (
@@ -36,7 +36,7 @@ export function ConveyorBelt({ id, from, to, isRework }: Props) {
           d={pathD}
           fill="none"
           stroke="#92400e"
-          strokeWidth={6}
+          strokeWidth={4}
           opacity={0.3}
           strokeLinecap="round"
         />
@@ -45,8 +45,8 @@ export function ConveyorBelt({ id, from, to, isRework }: Props) {
           d={pathD}
           fill="none"
           stroke="#f59e0b"
-          strokeWidth={2}
-          strokeDasharray="6 4"
+          strokeWidth={1.5}
+          strokeDasharray="4 3"
           opacity={0.7}
           className="conveyor-animate"
           markerEnd="url(#arrowConveyorRework)"
@@ -71,7 +71,7 @@ export function ConveyorBelt({ id, from, to, isRework }: Props) {
         d={pathD}
         fill="none"
         stroke="#1f2937"
-        strokeWidth={10}
+        strokeWidth={6}
         strokeLinecap="round"
       />
       {/* Belt edges */}
@@ -79,7 +79,7 @@ export function ConveyorBelt({ id, from, to, isRework }: Props) {
         d={pathD}
         fill="none"
         stroke="#374151"
-        strokeWidth={10}
+        strokeWidth={6}
         strokeLinecap="round"
         opacity={0.5}
       />
@@ -88,8 +88,8 @@ export function ConveyorBelt({ id, from, to, isRework }: Props) {
         d={pathD}
         fill="none"
         stroke="#6b7280"
-        strokeWidth={2}
-        strokeDasharray="8 12"
+        strokeWidth={1.5}
+        strokeDasharray="6 8"
         className="conveyor-animate"
         markerEnd="url(#arrowConveyor)"
       />

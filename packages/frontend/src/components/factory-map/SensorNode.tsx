@@ -64,7 +64,7 @@ export function SensorNode({ config, state, beltPathId }: Props) {
   if (!position) return null;
 
   const color = TYPE_COLORS[config.type] ?? '#6b7280';
-  const size = 6;
+  const size = 4;
 
   // Diamond points
   const diamondPoints = [
@@ -82,7 +82,7 @@ export function SensorNode({ config, state, beltPathId }: Props) {
           key={`flash-${flashKey}`}
           cx={position.x}
           cy={position.y}
-          r={6}
+          r={4}
           fill={state?.lastDecision ? DECISION_COLORS[state.lastDecision] : color}
           opacity={0.6}
           className="sensor-flash"
@@ -98,24 +98,12 @@ export function SensorNode({ config, state, beltPathId }: Props) {
         opacity={state?.isActive ? 1 : 0.6}
       />
 
-      {/* Display ID below */}
-      <text
-        x={position.x}
-        y={position.y + size + 10}
-        fontSize={6}
-        fill="#9ca3af"
-        textAnchor="middle"
-        fontWeight={600}
-      >
-        {config.displayId}
-      </text>
-
       {/* Decision label (fades after 2s) */}
       {state?.lastDecision && (
         <text
           x={position.x}
-          y={position.y - size - 4}
-          fontSize={8}
+          y={position.y - size - 3}
+          fontSize={6}
           fill={DECISION_COLORS[state.lastDecision]}
           textAnchor="middle"
           fontWeight={700}

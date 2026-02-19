@@ -36,8 +36,8 @@ export function StationNode({ config, state }: Props) {
     return part?.progressPct ?? 0;
   })();
 
-  const w = 80;
-  const h = 36;
+  const w = 44;
+  const h = 20;
   const x = config.position.x - w / 2;
   const y = config.position.y - h / 2;
 
@@ -49,67 +49,56 @@ export function StationNode({ config, state }: Props) {
         y={y}
         width={w}
         height={h}
-        rx={6}
+        rx={4}
         fill={STATUS_COLORS[status] ?? '#374151'}
         fillOpacity={0.3}
         stroke={STATUS_COLORS[status] ?? '#374151'}
-        strokeWidth={1.5}
+        strokeWidth={1}
       />
 
       {/* Progress bar (inside station) */}
       {isRunning && progress > 0 && (
         <rect
-          x={x + 2}
-          y={y + h - 5}
-          width={(w - 4) * (progress / 100)}
-          height={3}
-          rx={1.5}
+          x={x + 1}
+          y={y + h - 3}
+          width={(w - 2) * (progress / 100)}
+          height={2}
+          rx={1}
           fill={STATUS_COLORS.running}
           opacity={0.8}
           style={{ pointerEvents: 'none' }}
         />
       )}
 
-      {/* Station icon + displayId (top line) */}
+      {/* Station displayId (centered) */}
       <text
         x={config.position.x}
-        y={config.position.y - 4}
-        fontSize={11}
+        y={config.position.y + 1}
+        fontSize={7}
         fill="white"
         fontWeight={700}
         textAnchor="middle"
+        dominantBaseline="middle"
         style={{ pointerEvents: 'none' }}
       >
-        {TYPE_ICONS[config.type] ?? '\u2699'} {config.displayId}
-      </text>
-
-      {/* Station name (bottom line, smaller) */}
-      <text
-        x={config.position.x}
-        y={config.position.y + 10}
-        fontSize={7}
-        fill="#9ca3af"
-        textAnchor="middle"
-        style={{ pointerEvents: 'none' }}
-      >
-        {config.name}
+        {TYPE_ICONS[config.type] ?? '\u2699'}{config.displayId}
       </text>
 
       {/* Part chip above station (read-only label) */}
       {partId && (
         <g>
           <rect
-            x={config.position.x - 22}
-            y={y - 17}
-            width={44}
-            height={14}
-            rx={7}
+            x={config.position.x - 14}
+            y={y - 11}
+            width={28}
+            height={10}
+            rx={5}
             fill="#3b82f6"
           />
           <text
             x={config.position.x}
-            y={y - 7.5}
-            fontSize={8}
+            y={y - 4.5}
+            fontSize={6}
             fill="white"
             textAnchor="middle"
             fontWeight={600}
