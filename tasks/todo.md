@@ -1,63 +1,53 @@
 # Digital Twin POC - Task Tracking
 
-## V5: Read-Only Real-Time + Topic Data Viewer
-
-### Princip
-- Aedes broker spracuva kazdu MQTT spravu okamzite, state-manager update okamzity
-- **WS vrstva v server.ts posiela metric_update okamzite** — ziadny batch na serveri
-- **FE WebSocket vrstva** zbiera metric_update do internej Map (mimo Zustand)
-- FE refreshuje UI cez requestAnimationFrame / setInterval batch → 1x set() do Zustand
-- Ziadna historia, iba posledny stav
-- Zrusit override
-
-### Faza 1: Broker — zrusit WS batching + override
-- [ ] server.ts: zrusit metricBatchBuffer, startMetricBatching(), batch timer, batch logiku
-- [ ] server.ts: metric_update sa broadcastne okamzite (rovnako ako kazda ina WsMessage)
-- [ ] server.ts: zrusit simulatePartResume() (150 riadkov) + override_part case
-- [ ] state-manager: zrusit metricHistory ring buffer + METRIC_HISTORY_SIZE
-- [ ] state-manager: zrusit handlePartOverride()
-- [ ] state-manager: zrusit Part.history tracking (push v enter, update v exit/process)
-- [ ] state-manager: pridat Part.progressPct, zjednodusit getInitData
-
-### Faza 2: Shared + FE types
-- [ ] shared/types.ts: zrusit PartHistoryEntry, Part.history, Part.sensorEvents
-- [ ] shared/types.ts: zrusit MetricSample, StationState.metricHistory
-- [ ] shared/types.ts: zrusit metric_batch z WsMessage, part_override z WsMessage
-- [ ] shared/types.ts: zrusit override_part z WsRequest
-- [ ] shared/types.ts: pridat Part.progressPct
-- [ ] frontend/types.ts: mirror vsetky zmeny
-
-### Faza 3: FE — metricBuffer (FE-side batching)
-- [ ] Novy `metricBuffer.ts` mimo Zustand — Map<topicKey, {stationId, metric, value, unit, timestamp}>
-- [ ] pushMetric() funkcia — volana z useWebSocket pri kazdej metric_update sprave
-- [ ] flushMetrics() — vrati a vycisti buffer, volane z batch loopu
-- [ ] startMetricBatchLoop() — setInterval 500ms → flush → store.handleMetricFlush()
-- [ ] Aj ukladat VSETKY topicy pre Topic Data Viewer (nikdy neprecistene)
-
-### Faza 4: FE store cleanup
-- [ ] Novy handleMetricFlush(items) — 1x set() pre cely batch
-- [ ] Zrusit handleMetricBatch (stary broker-batch handler)
-- [ ] Zrusit history tracking z handlePartEnter/Exit/Process
-- [ ] Zrusit handlePartOverride, getStationHistory
-- [ ] Zrusit metricHistory ring buffer z handleMetricUpdate
-- [ ] Zjednodusit getStats — counters namiesto history iteracie
-
-### Faza 5: FE UI cleanup
-- [ ] DetailSlidePanel: zrusit override, PartTimeline, sparklines, recent parts
-- [ ] useWebSocket: metric_update → pushMetric(); zrusit metric_batch/part_override case
-
-### Faza 6: Topic Data Viewer
-- [ ] TopicDataViewer komponent — virtualizovany scrollable list 1900+ topicov
-  - Topic key (stationId/metric) | Value | Unit | Age
-  - Search/filter input
-  - Pocet unikatnych topicov
-- [ ] Integovat do UI (toggle panel alebo tab vedla factory mapy)
-
-### Faza 7: Cleanup
-- [ ] Zmazat PartTimeline.tsx, MetricSparkline.tsx, StationHealthIndicator.tsx
-- [ ] Cleanup nepotrrebnych importov
-
----
-
 ## Completed
-- [x] V1-V4.1
+
+### V1-V4.1: Base implementation + Metrics + Stress Test
+- [x] npm workspaces monorepo (shared, broker, simulator, frontend)
+- [x] Aedes MQTT broker + WebSocket bridge
+- [x] Factory simulator (parts, stations, sensors)
+- [x] React frontend (SVG map, Zustand store)
+- [x] Station-type metrics (Recharts sparklines, pie charts)
+- [x] Stress test (2000 topics, metric batching)
+
+### V5: Read-Only Real-Time Rework
+- [x] Faza 1: Broker — zrusit WS batching, override, metricHistory ring buffer
+- [x] Faza 2: Shared + FE types — zrusit Part.history, PartHistoryEntry, MetricSample, metric_batch
+- [x] Faza 3: FE metricBuffer (FE-side batching mimo Zustand)
+- [x] Faza 4: FE store cleanup — novy handleMetricFlush, zrusit history tracking
+- [x] Faza 5: FE UI cleanup — zrusit override, PartTimeline, sparklines
+- [x] Faza 6: TopicDataViewer komponent (fullscreen overlay, filter, 1900+ topicov)
+- [x] Faza 7: Cleanup — zmazat nepouzivane subory
+
+### V5.1: Read-Only UI
+- [x] Odstranit klikanie na stanice, kusy, senzory
+- [x] Odstranit DetailSlidePanel, OkNokPieChart, LiveEventFeed
+- [x] Odstranit selectedPartId/selectedStationId/selectedSensorId zo store
+- [x] Odstranit search z Header
+- [x] EventDrawer — part ID ako plain text (nie button)
+
+### V5.2: Scrapped Part Fixes
+- [x] Broker state-manager — zrusit guardy pre scrapped/completed v handlePartEnter/Exit/TransitStart
+- [x] FE store handleTransitStop — auto-remove stopped transit po 5s
+- [x] Unique part IDs — partCounter seeded z Date.now()
+
+### V5.3: Station Occupancy
+- [x] FactorySimulator — occupiedStations + occupiedBelts (Set<string>)
+- [x] SimulatedPart — enterStation() caka ak obsadene (polling 500ms)
+- [x] SimulatedPart — exitStation() uvolni stanicu
+- [x] SimulatedPart — transitToStation() caka ak belt obsadeny
+- [x] SimulatedPart — destroy() uvolni drzane zdroje (heldStation/heldBelt)
+
+### V6: Scale to 200 Stations
+- [x] factory-config.ts — programove generovanie 200 stanic (10 oblasti × 2 linky × 10 stanic)
+- [x] SVG viewBox zvacseny na 1600×900
+- [x] StationNode zmenseny na 44×20 px
+- [x] ConveyorBelt offsety aktualizovane (22/10 px)
+- [x] SensorNode zmenseny (4px diamond)
+- [x] TransitPartChip zmenseny (r=5)
+- [x] FactoryFloorMap — 10 area backgrounds v 2×5 gride
+- [x] Simulator — 30-60 aktivnych kusov, 20 liniek
+
+### V6.1: Documentation Update
+- [x] ARCHITECTURE.md — kompletny rewrite (200 stanic, read-only, FE batching, occupancy, priklady kodu)
+- [x] tasks/todo.md — aktualizacia na sucasny stav
