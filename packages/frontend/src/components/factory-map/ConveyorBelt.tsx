@@ -1,104 +1,93 @@
 import type { StationConfig } from '../../types.ts';
 
 interface Props {
-  id: string;
   from: StationConfig;
   to: StationConfig;
-  isRework: boolean;
 }
 
-export function ConveyorBelt({ id, from, to, isRework }: Props) {
-  const dx = to.position.x - from.position.x;
-  const dy = to.position.y - from.position.y;
-  const len = Math.sqrt(dx * dx + dy * dy);
+const STATION_W = 120;
 
-  // Offset start/end to be at station edge (22px = half station width, 10px = half height)
-  const offsetX = (dx / len) * 22;
-  const offsetY = (dy / len) * 10;
+export function ConveyorBelt({ from, to }: Props) {
+  // Belt connects right edge of "from" to left edge of "to"
+  const x1 = from.position.x + STATION_W / 2;
+  const y1 = from.position.y;
+  const x2 = to.position.x - STATION_W / 2;
+  const y2 = to.position.y;
 
-  const x1 = from.position.x + offsetX;
-  const y1 = from.position.y + offsetY;
-  const x2 = to.position.x - offsetX;
-  const y2 = to.position.y - offsetY;
-
-  const beltPathId = `belt-${from.stationId}__${to.stationId}`;
-
-  if (isRework) {
-    // Quadratic bezier going above
-    const midX = (x1 + x2) / 2;
-    const midY = Math.min(y1, y2) - 35;
-    const pathD = `M ${x1} ${y1} Q ${midX} ${midY} ${x2} ${y2}`;
-
-    return (
-      <g>
-        {/* Belt background */}
-        <path
-          d={pathD}
-          fill="none"
-          stroke="#92400e"
-          strokeWidth={4}
-          opacity={0.3}
-          strokeLinecap="round"
-        />
-        {/* Animated dashes */}
-        <path
-          d={pathD}
-          fill="none"
-          stroke="#f59e0b"
-          strokeWidth={1.5}
-          strokeDasharray="4 3"
-          opacity={0.7}
-          className="conveyor-animate"
-          markerEnd="url(#arrowConveyorRework)"
-        />
-        {/* Hidden path for transit animation */}
-        <path
-          id={beltPathId}
-          d={pathD}
-          fill="none"
-          stroke="none"
-        />
-      </g>
-    );
-  }
-
-  const pathD = `M ${x1} ${y1} L ${x2} ${y2}`;
+  const beltId = `belt-${from.stationId}-${to.stationId}`;
 
   return (
     <g>
-      {/* Belt background (thick) */}
-      <path
-        d={pathD}
-        fill="none"
-        stroke="#1f2937"
-        strokeWidth={6}
-        strokeLinecap="round"
-      />
-      {/* Belt edges */}
-      <path
-        d={pathD}
-        fill="none"
+      {/* Belt background (darker line) */}
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
         stroke="#374151"
-        strokeWidth={6}
+        strokeWidth={8}
         strokeLinecap="round"
-        opacity={0.5}
       />
-      {/* Animated dashes overlay */}
-      <path
-        d={pathD}
-        fill="none"
+
+      {/* Belt track lines (rails) */}
+      <line
+        x1={x1}
+        y1={y1 - 3}
+        x2={x2}
+        y2={y2 - 3}
+        stroke="#4b5563"
+        strokeWidth={1}
+      />
+      <line
+        x1={x1}
+        y1={y1 + 3}
+        x2={x2}
+        y2={y2 + 3}
+        stroke="#4b5563"
+        strokeWidth={1}
+      />
+
+      {/* Animated dashes (moving belt effect) */}
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
         stroke="#6b7280"
-        strokeWidth={1.5}
-        strokeDasharray="6 8"
-        className="conveyor-animate"
-        markerEnd="url(#arrowConveyor)"
-      />
-      {/* Hidden path for transit animation */}
-      <path
-        id={beltPathId}
-        d={pathD}
-        fill="none"
-        stroke="none"
+        strokeWidth={2}
+        strokeDasharray="8 12"
+        strokeLinecap="round"
+      >
+        <animate
+          attributeName="stroke-dashoffset"
+          from="0"
+          to="-20"
+          dur="1s"
+          repeatCount="indefinite"
+        />
+      </line>
+
+      {/* Arrow at the end */}
+      <defs>
+        <marker
+          id={beltId}
+          markerWidth="8"
+          markerHeight="6"
+          refX="8"
+          refY="3"
+          orient="auto"
+        >
+          <polygon points="0 0, 8 3, 0 6" fill="#6b7280" />
+        </marker>
+      </defs>
+      <line
+        x1={x1 + 10}
+        y1={y1}
+        x2={x2 - 2}
+        y2={y2}
+        stroke="transparent"
+        strokeWidth={1}
+        markerEnd={`url(#${beltId})`}
       />
     </g>
   );

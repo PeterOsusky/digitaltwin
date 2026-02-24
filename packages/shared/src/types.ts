@@ -1,191 +1,41 @@
-// ---- Metric Types ----
-
-export interface StationMetricConfig {
-  metricId: string;
-  label: string;
-  unit: string;
-  nominalMin: number;
-  nominalMax: number;
-  warningMin: number;
-  warningMax: number;
-  baseValue: number;
-  variance: number;
-}
-
-export interface StationCounters {
-  ok: number;
-  nok: number;
-  rework: number;
-}
-
-// ---- Part Tracking ----
-
-export type PartStatus = 'in_station' | 'in_transit' | 'completed' | 'scrapped';
-export type StationStatus = 'online' | 'offline' | 'error' | 'idle' | 'running';
-export type ExitResult = 'ok' | 'nok' | 'rework';
-export type StationType = 'load' | 'machine' | 'inspection' | 'measure' | 'buffer' | 'manual' | 'pack';
-
-export interface Part {
-  partId: string;
-  createdAt: string;
-  status: PartStatus;
-  currentStation: string | null;
-  currentArea: string | null;
-  currentLine: string | null;
-  progressPct: number;
-}
-
-// ---- Factory Layout ----
-
-export interface StationPosition {
-  x: number;
-  y: number;
-}
-
-export interface StationConfig {
-  stationId: string;
-  displayId: string;
-  name: string;
-  area: string;
-  line: string;
-  type: StationType;
-  position: StationPosition;
-  nextStations: string[];
-  reworkTarget?: string;
-  processingTime: [number, number];
-}
-
-export interface StationState {
-  stationId: string;
-  status: StationStatus;
-  currentPartId: string | null;
-  metrics: {
-    temperature?: number;
-    cycleTime?: number;
-    outputCount?: number;
-  };
-  counters?: StationCounters;
-}
-
-export interface LineConfig {
-  lineId: string;
-  area: string;
-  name: string;
-  stations: string[];
-}
+// ---- Area Configuration ----
 
 export interface AreaConfig {
   areaId: string;
   name: string;
-  lines: LineConfig[];
+  color: string;
+  bounds: { x: number; y: number; w: number; h: number };
+  stationIds: string[];
+}
+
+// ---- Station Configuration ----
+
+export interface StationConfig {
+  stationId: string;
+  name: string;
+  area: string;
+  mqttTopic: string;
+  isAliveTopic: string;
+  position: { x: number; y: number };
+  nextStations: string[];   // belt connections to next station(s)
+}
+
+export interface StationState {
+  stationId: string;
+  status: 'online' | 'offline';
+  lastValue: Record<string, unknown> | null;
+  lastUpdated: string | null;
+  lastAliveAt: string | null;
 }
 
 export interface FactoryLayout {
   areas: AreaConfig[];
   stations: Record<string, StationConfig>;
-  sensors: SensorConfig[];
 }
 
-// ---- Sensor System ----
-
-export type SensorType = 'data_check' | 'routing' | 'process_decision';
-export type SensorDecision = 'pass' | 'fail' | 'rework' | 'skip_process';
-
-export interface SensorConfig {
-  sensorId: string;
-  displayId: string;
-  type: SensorType;
-  fromStationId: string;
-  toStationId: string;
-  positionOnBelt: number;
-  failProbability: number;
-}
-
-export interface SensorState {
-  sensorId: string;
-  lastTriggeredAt: string | null;
-  lastDecision: SensorDecision | null;
-  lastPartId: string | null;
-  isActive: boolean;
-}
-
-export interface MqttSensorTrigger {
-  sensorId: string;
-  partId: string;
-  type: SensorType;
-  decision: SensorDecision;
-  timestamp: string;
-  fromStationId: string;
-  toStationId: string;
-}
-
-export interface MqttTransitStart {
-  partId: string;
-  fromStationId: string;
-  toStationId: string;
-  transitTimeMs: number;
-  timestamp: string;
-}
-
-export interface MqttTransitStop {
-  partId: string;
-  fromStationId: string;
-  toStationId: string;
-  reason: string;
-  timestamp: string;
-}
-
-// ---- MQTT Payloads ----
-
-export interface MqttPartEnter {
-  partId: string;
-  timestamp: string;
-  stationId: string;
-  area: string;
-  line: string;
-}
-
-export interface MqttPartExit {
-  partId: string;
-  timestamp: string;
-  stationId: string;
-  area: string;
-  line: string;
-  result: ExitResult;
-  cycleTimeMs: number;
-}
-
-export interface MqttPartProcess {
-  partId: string;
-  timestamp: string;
-  stationId: string;
-  progressPct: number;
-}
-
-export interface MqttStationStatus {
-  stationId: string;
-  status: StationStatus;
-  timestamp: string;
-  currentPartId: string | null;
-}
-
-export interface MqttMetric {
-  stationId: string;
-  value: number;
-  unit: string;
-  timestamp: string;
-}
-
-// ---- WebSocket Messages (Backend -> Frontend) ----
+// ---- WebSocket Messages ----
 
 export type WsMessage =
-  | { type: 'init'; data: { parts: Part[]; layout: FactoryLayout; stations: Record<string, StationState>; sensors: Record<string, SensorState> } }
-  | { type: 'part_enter'; data: MqttPartEnter }
-  | { type: 'part_exit'; data: MqttPartExit }
-  | { type: 'part_process'; data: MqttPartProcess }
-  | { type: 'station_status'; data: MqttStationStatus }
-  | { type: 'metric_update'; data: { stationId: string; metric: string; value: number; unit: string } }
-  | { type: 'part_created'; data: Part }
-  | { type: 'transit_start'; data: MqttTransitStart }
-  | { type: 'transit_stop'; data: MqttTransitStop }
-  | { type: 'sensor_trigger'; data: MqttSensorTrigger };
+  | { type: 'init'; data: { layout: FactoryLayout; stations: Record<string, StationState> } }
+  | { type: 'station_update'; data: { stationId: string; value: Record<string, unknown>; timestamp: string } }
+  | { type: 'station_status'; data: { stationId: string; status: 'online' | 'offline' } };

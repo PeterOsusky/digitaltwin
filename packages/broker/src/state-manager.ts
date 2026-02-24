@@ -1,136 +1,85 @@
-import type { Part, StationState, SensorState, FactoryLayout, ExitResult, StationStatus, SensorType, SensorDecision, StationCounters } from '@digital-twin/shared';
+import type { StationState, FactoryLayout, WsMessage } from '@digital-twin/shared';
 import { FACTORY_LAYOUT } from '@digital-twin/shared';
 
+/** Stations without isAlive for this long are marked offline */
+const ALIVE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 export class StateManager {
-  parts = new Map<string, Part>();
   stations = new Map<string, StationState>();
-  sensors = new Map<string, SensorState>();
   layout: FactoryLayout = FACTORY_LAYOUT;
-  /** stationId → OK/NOK/Rework counters */
-  stationCounters = new Map<string, StationCounters>();
 
   constructor() {
-    for (const [id] of Object.entries(this.layout.stations)) {
+    for (const id of Object.keys(this.layout.stations)) {
       this.stations.set(id, {
-        stationId: id, status: 'idle', currentPartId: null, metrics: { outputCount: 0 },
-      });
-      this.stationCounters.set(id, { ok: 0, nok: 0, rework: 0 });
-    }
-    for (const sensor of this.layout.sensors) {
-      this.sensors.set(sensor.sensorId, {
-        sensorId: sensor.sensorId, lastTriggeredAt: null,
-        lastDecision: null, lastPartId: null, isActive: false,
+        stationId: id,
+        status: 'offline',
+        lastValue: null,
+        lastUpdated: null,
+        lastAliveAt: null,
       });
     }
   }
 
-  handlePartEnter(partId: string, stationId: string, area: string, line: string, timestamp: string): boolean {
-    let part = this.parts.get(partId);
-    if (!part) {
-      part = {
-        partId, createdAt: timestamp, status: 'in_station',
-        currentStation: stationId, currentArea: area, currentLine: line, progressPct: 0,
-      };
-      this.parts.set(partId, part);
-    }
-    // Always overwrite — new data replaces scrapped/completed
-    part.status = 'in_station';
-    part.currentStation = stationId;
-    part.currentArea = area;
-    part.currentLine = line;
-    part.progressPct = 0;
+  /** Handle data message for a station */
+  handleStationUpdate(stationId: string, value: Record<string, unknown>, timestamp: string): boolean {
     const station = this.stations.get(stationId);
-    if (station) { station.status = 'running'; station.currentPartId = partId; }
+    if (!station) return false;
+
+    station.lastValue = value;
+    station.lastUpdated = timestamp;
     return true;
   }
 
-  handlePartExit(partId: string, stationId: string, result: ExitResult, cycleTimeMs: number, timestamp: string): boolean {
-    const part = this.parts.get(partId);
-    if (!part) return false;
-
-    const stationConfig = this.layout.stations[stationId];
-    if (result === 'nok') { part.status = 'scrapped'; part.currentStation = null; }
-    else if (stationConfig && stationConfig.nextStations.length === 0) { part.status = 'completed'; part.currentStation = null; }
-    else { part.status = 'in_transit'; part.currentStation = null; }
-    part.progressPct = 100;
-
+  /** Handle isAlive heartbeat. Returns true if station status changed to online. */
+  handleAlive(stationId: string, timestamp: string): boolean {
     const station = this.stations.get(stationId);
-    if (station) {
-      station.status = 'idle'; station.currentPartId = null;
-      station.metrics.outputCount = (station.metrics.outputCount ?? 0) + 1;
-      station.metrics.cycleTime = cycleTimeMs;
+    if (!station) return false;
+
+    station.lastAliveAt = timestamp;
+    if (station.status === 'offline') {
+      station.status = 'online';
+      return true; // status changed
+    }
+    return false;
+  }
+
+  /**
+   * Check all stations for alive timeout.
+   * Returns list of WsMessages for stations that just went offline.
+   */
+  checkAliveTimeouts(): WsMessage[] {
+    const now = Date.now();
+    const messages: WsMessage[] = [];
+
+    for (const [id, station] of this.stations) {
+      if (station.status !== 'online') continue;
+
+      if (!station.lastAliveAt) {
+        station.status = 'offline';
+        messages.push({ type: 'station_status', data: { stationId: id, status: 'offline' } });
+        continue;
+      }
+
+      const aliveTime = new Date(station.lastAliveAt).getTime();
+      if (now - aliveTime > ALIVE_TIMEOUT_MS) {
+        station.status = 'offline';
+        console.log(`[broker] Station ${id} went offline (no isAlive for 5 min)`);
+        messages.push({ type: 'station_status', data: { stationId: id, status: 'offline' } });
+      }
     }
 
-    const counters = this.stationCounters.get(stationId);
-    if (counters) {
-      if (result === 'ok') counters.ok++;
-      else if (result === 'nok') counters.nok++;
-      else if (result === 'rework') counters.rework++;
-    }
-
-    return true;
-  }
-
-  handlePartProcess(partId: string, stationId: string, progressPct: number): void {
-    const part = this.parts.get(partId);
-    if (part) part.progressPct = progressPct;
-  }
-
-  handleStationStatus(stationId: string, status: StationStatus, currentPartId: string | null): void {
-    const station = this.stations.get(stationId);
-    if (station) { station.status = status; station.currentPartId = currentPartId; }
-  }
-
-  handleMetric(stationId: string, metric: string, value: number): void {
-    const station = this.stations.get(stationId);
-    if (!station) return;
-    if (metric === 'temperature') station.metrics.temperature = value;
-    else if (metric === 'cycle_time') station.metrics.cycleTime = value;
-    else if (metric === 'output_count') station.metrics.outputCount = value;
-  }
-
-  handleTransitStart(partId: string, fromStationId: string, toStationId: string, transitTimeMs: number, timestamp: string): boolean {
-    const part = this.parts.get(partId);
-    if (!part) return false;
-    part.status = 'in_transit'; part.currentStation = null;
-    return true;
-  }
-
-  handleTransitStop(partId: string, timestamp: string): void {
-    const part = this.parts.get(partId);
-    if (part) { part.status = 'scrapped'; part.currentStation = null; }
-  }
-
-  handleSensorTrigger(sensorId: string, partId: string, type: SensorType, decision: SensorDecision, timestamp: string): void {
-    const sensor = this.sensors.get(sensorId);
-    if (sensor) {
-      sensor.lastTriggeredAt = timestamp;
-      sensor.lastDecision = decision;
-      sensor.lastPartId = partId;
-      sensor.isActive = true;
-      setTimeout(() => { sensor.isActive = false; }, 2000);
-    }
+    return messages;
   }
 
   getInitData() {
     const stationsObj: Record<string, StationState> = {};
     for (const [id, station] of this.stations) {
-      stationsObj[id] = {
-        ...station,
-        counters: this.stationCounters.get(id) ?? { ok: 0, nok: 0, rework: 0 },
-      };
+      stationsObj[id] = { ...station };
     }
 
     return {
-      parts: [...this.parts.values()],
       layout: this.layout,
       stations: stationsObj,
-      sensors: Object.fromEntries(this.sensors),
     };
-  }
-
-  searchParts(query: string): Part[] {
-    const q = query.toLowerCase();
-    return [...this.parts.values()].filter(p => p.partId.toLowerCase().includes(q)).slice(0, 20);
   }
 }

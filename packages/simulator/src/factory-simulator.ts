@@ -1,198 +1,67 @@
 import type { MqttClient } from 'mqtt';
-import { getLineRoutes, FACTORY_LAYOUT, STATION_METRIC_CONFIGS } from '@digital-twin/shared';
-import type { StationMetricConfig } from '@digital-twin/shared';
-import { SimulatedPart } from './simulated-part.js';
-
-function randomBetween(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-const STRESS_TEST = process.env.STRESS_TEST === '1';
-const VIRTUAL_STATION_COUNT = 125;
-const VIRTUAL_METRICS = [
-  'temperature', 'vibration', 'power', 'pressure', 'humidity',
-  'flow_rate', 'rpm', 'torque', 'voltage', 'current',
-  'resistance', 'weight', 'dimension', 'accuracy', 'speed',
-]; // 15 metrics per virtual station = 1875 topics
+import { FACTORY_LAYOUT } from '@digital-twin/shared';
 
 export class FactorySimulator {
-  private activeParts = new Map<string, SimulatedPart>();
-  /** Global monotonic counter — seeded from timestamp to ensure uniqueness across restarts */
-  private partCounter = Math.floor(Date.now() / 1000) % 100000;
   private running = false;
-  private createTimer: ReturnType<typeof setTimeout> | null = null;
-  private metricsTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly lines = getLineRoutes();
-  /** Random-walk state: stationId → metricId → current value */
-  private metricState = new Map<string, Map<string, number>>();
-  /** Shared occupancy: only 1 part at a station at a time */
-  readonly occupiedStations = new Set<string>();
-  /** Shared occupancy: only 1 part on a belt segment at a time (key = fromId__toId) */
-  readonly occupiedBelts = new Set<string>();
+  private dataTimer: ReturnType<typeof setInterval> | null = null;
+  private aliveTimer: ReturnType<typeof setInterval> | null = null;
+  private partCounter = Math.floor(Date.now() / 1000) % 100000;
 
   constructor(private readonly client: MqttClient) {}
 
   start() {
     this.running = true;
-    console.log(`[simulator] Starting with ${this.lines.length} production lines`);
+    const stations = Object.values(FACTORY_LAYOUT.stations);
+    console.log(`[simulator] Starting with ${stations.length} stations`);
 
-    // Publish initial station statuses
-    for (const [id, station] of Object.entries(FACTORY_LAYOUT.stations)) {
-      this.client.publish(
-        `factory/${station.area}/${station.line}/${id}/status`,
-        JSON.stringify({
-          stationId: id,
-          status: 'idle',
+    // Send initial isAlive for all stations immediately
+    this.publishAlive(stations);
+
+    // Publish isAlive heartbeat every 30 seconds
+    this.aliveTimer = setInterval(() => {
+      if (!this.running) return;
+      this.publishAlive(stations);
+    }, 30_000);
+
+    // Publish OK/NOK data for each station every 1.5 seconds
+    this.dataTimer = setInterval(() => {
+      if (!this.running) return;
+
+      for (const station of stations) {
+        this.partCounter++;
+        const partId = `PART-${new Date().getFullYear()}-${String(this.partCounter).padStart(5, '0')}`;
+        const result = Math.random() < 0.85 ? 'ok' : 'nok';
+        const payload = JSON.stringify({
+          partId,
+          result,
           timestamp: new Date().toISOString(),
-          currentPartId: null,
-        }),
-      );
-    }
+        });
 
-    // Start creating parts
-    this.scheduleNextPart();
-
-    // Start metrics publishing
-    this.metricsTimer = setInterval(() => {
-      this.publishMetrics();
-      if (STRESS_TEST) this.publishStressMetrics();
-    }, 5000);
-
-    if (STRESS_TEST) {
-      const totalVirtual = VIRTUAL_STATION_COUNT * VIRTUAL_METRICS.length;
-      console.log(`[simulator] STRESS TEST: ${VIRTUAL_STATION_COUNT} virtual stations × ${VIRTUAL_METRICS.length} metrics = ${totalVirtual} extra topics (total ~${totalVirtual + 35} metric topics)`);
-    }
+        this.client.publish(station.mqttTopic, payload);
+      }
+    }, 1500);
   }
 
   stop() {
     this.running = false;
-    if (this.createTimer) clearTimeout(this.createTimer);
-    if (this.metricsTimer) clearInterval(this.metricsTimer);
-    for (const part of this.activeParts.values()) {
-      part.destroy();
+    if (this.dataTimer) {
+      clearInterval(this.dataTimer);
+      this.dataTimer = null;
     }
-    this.activeParts.clear();
-  }
-
-  private scheduleNextPart() {
-    if (!this.running) return;
-
-    // Keep 30-50 active parts across 20 production lines
-    const delay = this.activeParts.size < 30
-      ? randomBetween(1000, 3000)
-      : randomBetween(4000, 8000);
-
-    this.createTimer = setTimeout(() => {
-      if (this.running && this.activeParts.size < 60) {
-        this.createPart();
-      }
-      this.scheduleNextPart();
-    }, delay);
-  }
-
-  private createPart() {
-    this.partCounter++;
-    const partId = `PART-${new Date().getFullYear()}-${String(this.partCounter).padStart(5, '0')}`;
-    const line = this.lines[Math.floor(Math.random() * this.lines.length)];
-
-    console.log(`[simulator] Creating ${partId} on ${line.lineId} (${line.area})`);
-
-    const part = new SimulatedPart(
-      partId,
-      line.stations,
-      line.area,
-      line.lineId,
-      this.client,
-      this.occupiedStations,
-      this.occupiedBelts,
-      (id) => {
-        this.activeParts.delete(id);
-        console.log(`[simulator] ${id} completed/scrapped (active: ${this.activeParts.size})`);
-      },
-    );
-
-    this.activeParts.set(partId, part);
-    part.start();
-  }
-
-  private publishMetrics() {
-    for (const [id, station] of Object.entries(FACTORY_LAYOUT.stations)) {
-      const configs = STATION_METRIC_CONFIGS[station.type] ?? [];
-      if (configs.length === 0) continue;
-
-      // Ensure we have random-walk state for this station
-      if (!this.metricState.has(id)) {
-        const stationMetrics = new Map<string, number>();
-        for (const cfg of configs) {
-          stationMetrics.set(cfg.metricId, cfg.baseValue);
-        }
-        this.metricState.set(id, stationMetrics);
-      }
-      const stateMap = this.metricState.get(id)!;
-
-      for (const cfg of configs) {
-        // Random walk: drift toward base value with some noise
-        let current = stateMap.get(cfg.metricId) ?? cfg.baseValue;
-        const drift = (cfg.baseValue - current) * 0.1; // mean-reverting
-        const noise = (Math.random() - 0.5) * cfg.variance * 0.4;
-        current = current + drift + noise;
-        // Clamp to reasonable bounds
-        current = Math.max(cfg.warningMin - cfg.variance * 0.2, Math.min(cfg.warningMax + cfg.variance * 0.2, current));
-        current = Math.round(current * 100) / 100;
-        stateMap.set(cfg.metricId, current);
-
-        this.client.publish(
-          `factory/${station.area}/${station.line}/${id}/metrics/${cfg.metricId}`,
-          JSON.stringify({
-            stationId: id,
-            value: current,
-            unit: cfg.unit,
-            timestamp: new Date().toISOString(),
-          }),
-        );
-      }
+    if (this.aliveTimer) {
+      clearInterval(this.aliveTimer);
+      this.aliveTimer = null;
     }
   }
 
-  /** Stress test: publish ~1875 virtual metric topics */
-  private publishStressMetrics() {
+  private publishAlive(stations: typeof FACTORY_LAYOUT.stations[keyof typeof FACTORY_LAYOUT.stations][]) {
     const timestamp = new Date().toISOString();
-    let count = 0;
-
-    for (let i = 1; i <= VIRTUAL_STATION_COUNT; i++) {
-      const stationId = `virt-${String(i).padStart(3, '0')}`;
-
-      // Initialize state if needed
-      if (!this.metricState.has(stationId)) {
-        const stateMap = new Map<string, number>();
-        for (const metricId of VIRTUAL_METRICS) {
-          stateMap.set(metricId, 50 + Math.random() * 50); // base 50-100
-        }
-        this.metricState.set(stationId, stateMap);
-      }
-      const stateMap = this.metricState.get(stationId)!;
-
-      for (const metricId of VIRTUAL_METRICS) {
-        let current = stateMap.get(metricId) ?? 75;
-        // Random walk
-        current += (Math.random() - 0.5) * 5;
-        current = Math.max(10, Math.min(150, current));
-        current = Math.round(current * 100) / 100;
-        stateMap.set(metricId, current);
-
-        this.client.publish(
-          `factory/stress/virtual/${stationId}/metrics/${metricId}`,
-          JSON.stringify({
-            stationId,
-            value: current,
-            unit: 'unit',
-            timestamp,
-          }),
-        );
-        count++;
-      }
+    for (const station of stations) {
+      this.client.publish(
+        station.isAliveTopic,
+        JSON.stringify({ timestamp }),
+      );
     }
-
-    console.log(`[simulator] Stress: published ${count} virtual metrics`);
+    console.log(`[simulator] Sent isAlive for ${stations.length} stations`);
   }
 }

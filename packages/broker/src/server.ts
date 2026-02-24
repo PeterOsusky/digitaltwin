@@ -4,11 +4,13 @@ import mqtt from 'mqtt';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import type { WsMessage } from '@digital-twin/shared';
+import { getMqttTopics } from '@digital-twin/shared';
 import { StateManager } from './state-manager.js';
 import { processMessage } from './mqtt-handler.js';
 
 const MQTT_PORT = 1883;
 const WS_PORT = 3001;
+const ALIVE_CHECK_INTERVAL = 30_000; // check every 30s
 
 // 1. Create Aedes MQTT broker
 const aedes = new Aedes();
@@ -29,15 +31,18 @@ mqttServer.listen(MQTT_PORT, () => {
 // 2. State manager
 const state = new StateManager();
 
-// 3. Internal MQTT client - subscribe to all factory topics
+// 3. Internal MQTT client - subscribe to all station topics (data + isAlive)
 const client = mqtt.connect(`mqtt://localhost:${MQTT_PORT}`);
 
 client.on('connect', () => {
   console.log('[broker] Internal MQTT client connected');
-  client.subscribe('factory/#', (err) => {
-    if (err) console.error('[broker] Subscribe error:', err);
-    else console.log('[broker] Subscribed to factory/#');
-  });
+  const topics = getMqttTopics();
+  for (const topic of topics) {
+    client.subscribe(topic, (err) => {
+      if (err) console.error(`[broker] Subscribe error for ${topic}:`, err);
+      else console.log(`[broker] Subscribed to ${topic}`);
+    });
+  }
 });
 
 // 4. WebSocket server for frontend
@@ -62,13 +67,21 @@ wss.on('connection', (socket) => {
   });
 });
 
-// 5. Bridge: MQTT -> state update -> WS broadcast (all messages sent immediately)
+// 5. Bridge: MQTT -> state update -> WS broadcast
 client.on('message', (topic, payload) => {
   const wsMsg = processMessage(topic, payload, state);
   if (wsMsg) {
     broadcast(wsMsg);
   }
 });
+
+// 6. Periodic alive timeout check
+setInterval(() => {
+  const offlineMessages = state.checkAliveTimeouts();
+  for (const msg of offlineMessages) {
+    broadcast(msg);
+  }
+}, ALIVE_CHECK_INTERVAL);
 
 function broadcast(msg: WsMessage) {
   const json = JSON.stringify(msg);
